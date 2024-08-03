@@ -1,10 +1,16 @@
 use std::fmt::Debug;
 
 use argon2::{
+    password_hash,
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
-    Argon2,
+    Argon2, PasswordHash, PasswordVerifier,
 };
-use axum::{extract::Path, http::StatusCode, routing::get, Extension, Json, Router};
+use axum::{
+    extract::{Path, Query},
+    http::StatusCode,
+    routing::get,
+    Extension, Json, Router,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, PgPool};
 
@@ -27,14 +33,34 @@ pub struct User {
     pub id: i32,
     pub username: String,
     pub hash: String, // A PHC-format hash string of the user's password
+    pub sessions: Vec<String>,
+
     pub name: String,
+    pub role: Role,
 
     pub description: String,
     pub department: Option<i32>,
 
-    pub role: Role,
     pub permissions: Vec<Permission>,
 }
+
+// impl User {
+//     pub async fn logout(&mut self, pool: PgPool, ) -> Result<(), PhsError> {
+//         struct SessionsWrapped {
+//             sessions: Vec<String>,
+//         }
+
+//         let SessionsWrapped { sessions } = sqlx::query_as!(
+//             SessionsWrapped,
+//             r#"SELECT sessions FROM users WHERE id = $1"#,
+//             self.id
+//         )
+//         .fetch_one(&pool)
+//         .await?;
+
+//         Ok(())
+//     }
+// }
 
 impl Debug for User {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -49,16 +75,13 @@ impl Debug for User {
     }
 }
 
-#[derive(Serialize, Deserialize, FromRow)]
-pub struct UserHash {
-    pub id: i32,
-    pub hash: String,
-}
-
 pub fn router() -> Router {
     Router::new()
         .route("/v1/users", get(get_users).post(create_user))
-        .route("/v1/users/:id", get(get_user))
+        .route(
+            "/v1/users/:id",
+            get(get_user).put(put_user).delete(delete_user),
+        )
 }
 
 #[derive(Deserialize)]
@@ -77,11 +100,11 @@ async fn create_user(
 
     Extension(pool): Extension<PgPool>,
     Json(req): Json<CreateUserRequest>,
-) -> Result<Json<PublicUser>, PhsError> {
+) -> Result<Json<UserSafe>, PhsError> {
     if req.department.is_some()
         && sqlx::query_as!(
             Department,
-            r#"SELECT * FROM departments WHERE id = $1"#,
+            r#"SELECT id, department FROM departments WHERE id = $1"#,
             req.department.unwrap()
         )
         .fetch_optional(&pool)
@@ -110,11 +133,16 @@ async fn create_user(
         .to_string();
 
     let user = sqlx::query_as!(
-        PublicUser,
+        UserSafe,
         r#"
         INSERT INTO users (name, username, role, description, department, hash)
         VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, name, username, role as "role: Role", description, department
+        RETURNING id,
+            name,
+            username,
+            role as "role: _",
+            description,
+            department
         "#,
         req.name,
         req.username,
@@ -130,7 +158,7 @@ async fn create_user(
 }
 
 #[derive(Serialize)]
-struct PublicUser {
+struct UserSafe {
     id: i32,
     name: String,
     username: String,
@@ -142,9 +170,9 @@ struct PublicUser {
 async fn get_user(
     Path(id): Path<i32>,
     Extension(pool): Extension<PgPool>,
-) -> Result<Json<PublicUser>, PhsError> {
+) -> Result<Json<UserSafe>, PhsError> {
     let user = sqlx::query_as!(
-        PublicUser,
+        UserSafe,
         r#"
         SELECT id, name, username, role as "role: Role", description, department
         FROM users
@@ -158,16 +186,176 @@ async fn get_user(
     Ok(Json(user))
 }
 
-async fn get_users(Extension(pool): Extension<PgPool>) -> Result<Json<Vec<PublicUser>>, PhsError> {
-    let user = sqlx::query_as!(
-        PublicUser,
+#[derive(Serialize)]
+struct UserNoHash {
+    id: i32,
+    username: String,
+    name: String,
+
+    description: String,
+    department: Option<i32>,
+
+    role: Role,
+    permissions: Vec<Permission>,
+    sessions: Vec<String>,
+}
+
+async fn get_users(
+    _auth_session: AuthSession,
+    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+
+    Extension(pool): Extension<PgPool>,
+) -> Result<Json<Vec<UserNoHash>>, PhsError> {
+    let users_no_hash = sqlx::query_as!(
+        UserNoHash,
         r#"
-        SELECT id, name, username, role as "role: Role", description, department
+        SELECT id,
+            name,
+            username,
+            role as "role: _",
+            description,
+            department,
+            permissions as "permissions: _",
+            sessions
         FROM users
         "#,
     )
     .fetch_all(&pool)
     .await?;
 
-    Ok(Json(user))
+    Ok(Json(users_no_hash))
+}
+
+#[derive(Deserialize)]
+struct PutUserBody {
+    username: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    department: Option<i32>,
+    role: Option<Role>,
+}
+
+async fn put_user(
+    _auth_session: AuthSession,
+    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+
+    Query(id): Query<i32>,
+    Extension(pool): Extension<PgPool>,
+    Json(body): Json<PutUserBody>,
+) -> Result<Json<UserSafe>, PhsError> {
+    let user_no_hash = sqlx::query_as!(
+        UserSafe,
+        r#"
+        UPDATE users SET
+            username = $1,
+            name = $2,
+            description = $3,
+            department = $4,
+            role = $5
+        WHERE id = $6
+        RETURNING id,
+            username,
+            name,
+            description,
+            department,
+            role as "role: _"
+        "#,
+        body.username,
+        body.name,
+        body.description,
+        body.department,
+        body.role as Option<Role>,
+        id
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    Ok(Json(user_no_hash))
+}
+
+struct ChangePasswordBody {
+    current_password: String,
+    new_password: String,
+}
+
+async fn change_password(
+    mut auth_session: AuthSession,
+    Extension(pool): Extension<PgPool>,
+    Json(body): Json<ChangePasswordBody>,
+) -> Result<(), PhsError> {
+    let user = auth_session.user();
+
+    Argon2::default()
+        .verify_password(
+            body.current_password.as_bytes(),
+            &PasswordHash::new(user.hash.as_str())?,
+        )
+        .map_err(|e| match e {
+            password_hash::Error::Password => PhsError::UNAUTHORIZED,
+            _ => PhsError::INTERNAL,
+        })?;
+
+    // Verified as of here
+
+    let new_hash = Argon2::default()
+        .hash_password(
+            body.new_password.as_bytes(),
+            &SaltString::generate(&mut OsRng),
+        )?
+        .to_string();
+
+    let old_sessions = sqlx::query_scalar!(
+        r#"
+        UPDATE users
+        SET sessions = array[]::text[],
+            hash = $1
+        FROM  (SELECT sessions FROM users WHERE id = $2 FOR UPDATE) old
+        WHERE  users.id = $2
+        RETURNING old.sessions
+        "#,
+        new_hash,
+        user.id
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    let old_sessions = sqlx::query_scalar!(
+        r#"
+        UPDATE users
+        SET sessions = array[]::text[]
+        FROM  (SELECT sessions FROM users WHERE id = $1 FOR UPDATE) old
+        WHERE  users.id = $1
+        RETURNING old.sessions
+        "#,
+        user.id
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    auth_session.destroy().await?;
+
+    Ok(())
+}
+
+async fn reset_password(
+    _auth_session: AuthSession,
+    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+
+    Extension(pool): Extension<PgPool>,
+) -> Result<(), PhsError> {
+    todo!()
+}
+
+async fn delete_user(
+    _auth_session: AuthSession,
+    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+
+    Query(id): Query<i32>,
+    Extension(pool): Extension<PgPool>,
+) -> Result<(), PhsError> {
+    sqlx::query!("delete from users where id = $1", id)
+        .fetch_one(&pool)
+        .await?;
+
+    Ok(())
 }

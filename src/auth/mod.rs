@@ -6,10 +6,12 @@ use crate::{error::PhsError, resources::User};
 
 mod endpoints;
 mod permission;
+mod redis_sessions;
 mod service;
 
 pub use endpoints::router;
-pub use permission::*;
+pub use permission::{Group, Permission, RequirePermission};
+pub use redis_sessions::RedisStore;
 pub use service::AuthManagerLayer;
 
 pub const SESSION_DATA_KEY: &str = "phs.user";

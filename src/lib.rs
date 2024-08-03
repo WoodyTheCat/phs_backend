@@ -1,21 +1,21 @@
 #![warn(clippy::correctness, clippy::perf, clippy::suspicious)]
+#![forbid(unsafe_code)]
 
-use std::error::Error;
-
-use auth::AuthManagerLayer;
+use auth::{AuthManagerLayer, RedisStore};
 use axum::{Extension, Router};
+use fred::prelude::RedisPool;
 use sqlx::PgPool;
+use std::error::Error;
 use time::Duration;
 
 use tower_sessions::{Expiry, SessionManagerLayer};
-use tower_sessions_redis_store::{fred::prelude::RedisPool, RedisStore};
 
 mod auth;
 mod error;
 mod resources;
 
 pub fn app(db: PgPool, redis_pool: RedisPool) -> Router {
-    let session_store = RedisStore::new(redis_pool);
+    let session_store = RedisStore::new(redis_pool.clone());
     let session_manager_layer = SessionManagerLayer::new(session_store)
         .with_secure(true)
         .with_expiry(Expiry::OnInactivity(Duration::hours(2)));
@@ -26,6 +26,7 @@ pub fn app(db: PgPool, redis_pool: RedisPool) -> Router {
         .merge(resources::router())
         .merge(auth::router())
         .layer(Extension(db))
+        .layer(Extension(redis_pool))
         .layer(auth_layer)
 }
 

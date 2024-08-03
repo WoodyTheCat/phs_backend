@@ -2,11 +2,11 @@
 
 use std::error::Error;
 
-use sqlx::postgres::PgPoolOptions;
-use tower_sessions_redis_store::fred::{
+use fred::{
     prelude::{ClientLike, RedisPool},
     types::RedisConfig,
 };
+use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 #[tokio::main]
@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Initiate logging
     tracing_subscriber::registry()
         .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
-            |_| "axum_login=debug,tower_sessions=debug,sqlx=warn,tower_http=debug".into(),
+            |_| "trace,tower_sessions=trace,sqlx=warn,tower_http=debug,fred=info".into(),
         )))
         .with(tracing_subscriber::fmt::layer())
         .try_init()?;

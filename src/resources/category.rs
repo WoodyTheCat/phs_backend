@@ -32,7 +32,7 @@ struct CreateCategoryBody {
 }
 
 async fn get_tags(Extension(pool): Extension<PgPool>) -> Result<Json<Vec<Category>>, PhsError> {
-    let tags = sqlx::query_as!(Category, "SELECT * FROM categories LIMIT 100")
+    let tags = sqlx::query_as!(Category, "SELECT id, category FROM categories LIMIT 100")
         .fetch_all(&pool)
         .await?;
 
@@ -43,9 +43,18 @@ async fn get_tag(
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<Json<Category>, PhsError> {
-    let tag = sqlx::query_as!(Category, r#"SELECT * FROM categories WHERE id = $1"#, id)
-        .fetch_one(&pool)
-        .await?;
+    let tag = sqlx::query_as!(
+        Category,
+        r#"
+        SELECT id,
+            category
+        FROM categories
+        WHERE id = $1
+        "#,
+        id
+    )
+    .fetch_one(&pool)
+    .await?;
 
     Ok(Json(tag))
 }
@@ -59,7 +68,11 @@ async fn create_tag(
 ) -> Result<Json<Category>, PhsError> {
     let tag = sqlx::query_as!(
         Category,
-        r#"INSERT INTO categories(category) VALUES ($1) RETURNING *"#,
+        r#"
+        INSERT INTO categories(category)
+        VALUES ($1)
+        RETURNING id, category
+        "#,
         req.tag
     )
     .fetch_one(&pool)
@@ -83,7 +96,12 @@ async fn put_tag(
 ) -> Result<Json<Category>, PhsError> {
     let tag = sqlx::query_as!(
         Category,
-        r#"UPDATE categories SET category = $1 WHERE id = $2 RETURNING *"#,
+        r#"
+        UPDATE categories
+        SET category = $1
+        WHERE id = $2
+        RETURNING id, category
+        "#,
         body.new,
         id
     )

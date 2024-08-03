@@ -1,13 +1,15 @@
 use argon2::{password_hash, Argon2, PasswordHash, PasswordVerifier};
 use axum::{
+    debug_handler,
     extract::Query,
     response::IntoResponse,
     routing::{get, post, put},
     Extension, Json, Router,
 };
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use tower_sessions::Session;
+use tower_sessions::{IdType, Session};
 
 use crate::{auth::Permission, error::PhsError, resources::User};
 
@@ -32,6 +34,7 @@ struct PostLoginBody {
     password: String,
 }
 
+#[debug_handler]
 async fn login(
     session: Session,
     Extension(pool): Extension<PgPool>,
@@ -42,7 +45,7 @@ async fn login(
     let user = sqlx::query_as!(
         User,
         r#"
-        SELECT id, name, username, role as "role: _", description, department, hash, permissions as "permissions: Vec<Permission>"
+        SELECT id, name, username, role as "role: _", description, department, hash, permissions as "permissions: Vec<Permission>", sessions
         FROM users
         WHERE username = $1
         "#,
@@ -63,17 +66,46 @@ async fn login(
 
     // Credentials are correct as of here
 
-    session.insert(super::SESSION_DATA_KEY, user).await?;
+    session.insert(super::SESSION_DATA_KEY, &user).await?;
+
+    sqlx::query!(
+        r#"UPDATE users SET sessions = array_append(sessions, $1) WHERE id = $2"#,
+        id_type_to_hash(session.id().await).ok_or(PhsError::INTERNAL)?,
+        user.id
+    )
+    .fetch_one(&pool)
+    .await?;
 
     Ok("Logged in!")
+}
+
+fn id_type_to_hash(id: IdType) -> Option<String> {
+    match id {
+        IdType::Id(id) | IdType::Unloaded(id) => Some(hex::encode(Sha256::digest(id.to_string()))),
+        _ => None,
+    }
 }
 
 async fn whoami(session: AuthSession) -> Result<String, PhsError> {
     Ok(session.user.username)
 }
 
-async fn logout(mut auth_session: AuthSession) -> Result<(), PhsError> {
+async fn logout(
+    mut auth_session: AuthSession,
+    Extension(pool): Extension<PgPool>,
+) -> Result<(), PhsError> {
+    let user_id = auth_session.user.id;
+    let session_id = auth_session.session.id().await;
+
     auth_session.destroy().await?;
+
+    sqlx::query!(
+        r#"UPDATE users SET sessions = array_remove(sessions, $1) WHERE id = $2"#,
+        id_type_to_hash(session_id).ok_or(PhsError::INTERNAL)?,
+        user_id
+    )
+    .fetch_one(&pool)
+    .await?;
 
     Ok(())
 }

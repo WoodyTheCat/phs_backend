@@ -32,6 +32,7 @@ macro_rules! i32_to_enum {
 
 i32_to_enum!(
     #[derive(PartialEq, Eq, Clone, sqlx::Type, Deserialize, Serialize)]
+    #[non_exhaustive]
     #[sqlx(type_name = "permission", rename_all = "snake_case")]
     pub enum Permission {
         EditDepartments,

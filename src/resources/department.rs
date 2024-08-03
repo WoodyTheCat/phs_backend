@@ -1,6 +1,6 @@
 use axum::{
     extract::Path,
-    routing::{delete, get, post},
+    routing::{delete, post},
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -25,16 +25,21 @@ pub fn router() -> Router {
                 .put(put_department)
                 .get(get_department),
         )
-        .route("/v1/departments", get(get_departments))
-        .route("/v1/department", post(create_department))
+        .route(
+            "/v1/departments",
+            post(create_department).get(get_departments),
+        )
 }
 
 async fn get_departments(
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<Vec<Department>>, PhsError> {
-    let departments = sqlx::query_as!(Department, "SELECT * FROM departments LIMIT 100")
-        .fetch_all(&pool)
-        .await?;
+    let departments = sqlx::query_as!(
+        Department,
+        r#"SELECT id, department FROM departments LIMIT 100"#
+    )
+    .fetch_all(&pool)
+    .await?;
 
     Ok(Json(departments))
 }
@@ -43,9 +48,13 @@ async fn get_department(
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<Json<Department>, PhsError> {
-    let department = sqlx::query_as!(Department, r#"SELECT * FROM departments WHERE id = $1"#, id)
-        .fetch_one(&pool)
-        .await?;
+    let department = sqlx::query_as!(
+        Department,
+        r#"SELECT id, department FROM departments WHERE id = $1"#,
+        id
+    )
+    .fetch_one(&pool)
+    .await?;
 
     Ok(Json(department))
 }
@@ -64,7 +73,11 @@ async fn create_department(
 ) -> Result<Json<Department>, PhsError> {
     let department = sqlx::query_as!(
         Department,
-        r#"INSERT INTO departments(department) VALUES ($1) RETURNING *"#,
+        r#"
+        INSERT INTO departments(department)
+        VALUES ($1)
+        RETURNING id, department
+        "#,
         req.department
     )
     .fetch_one(&pool)
@@ -88,7 +101,12 @@ async fn put_department(
 ) -> Result<Json<Department>, PhsError> {
     let department = sqlx::query_as!(
         Department,
-        r#"UPDATE departments SET department = $1 WHERE id = $2 RETURNING *"#,
+        r#"
+        UPDATE departments
+        SET department = $1
+        WHERE id = $2
+        RETURNING id, department
+        "#,
         body.new,
         id
     )

@@ -53,11 +53,20 @@ async fn get_posts(
     let posts = sqlx::query_as!(
         Post,
         r#"
-            SELECT * FROM posts
+            SELECT id,
+                title,
+                content,
+                pinned,
+                department,
+                category,
+                author,
+                date
+            FROM posts
             WHERE ($1::integer IS NULL OR author = $1)
               AND ($2::integer IS NULL OR category = $2)
               AND ($3::integer IS NULL OR department = $3)
-            ORDER BY pinned DESC, date DESC
+            ORDER BY pinned DESC,
+                date DESC
             LIMIT LEAST(100, $4)
             OFFSET $5
             "#,
@@ -94,9 +103,23 @@ async fn new_post(
     let post = sqlx::query_as!(
         Post,
         r#"
-            INSERT INTO posts (title, content, author, pinned, department, category)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING *
+            INSERT INTO posts (
+                title,
+                content,
+                author,
+                pinned,
+                department,
+                category
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6
+            ) RETURNING id,
+                title,
+                content,
+                pinned,
+                department,
+                category,
+                author,
+                date
             "#,
         body.title,
         body.content,
@@ -111,7 +134,6 @@ async fn new_post(
     Ok(Json(post))
 }
 
-// TODO: Auth(teacher), check author/admin
 async fn delete_post(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditPosts as i32 }>,
@@ -119,34 +141,30 @@ async fn delete_post(
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<(), PhsError> {
-    sqlx::query_as!(
-        Post,
-        r#"DELETE FROM posts WHERE id = $1"#, //  AND (author = $2 OR $2 = 0)
-        id,
-    )
-    .execute(&pool)
-    .await?;
+    sqlx::query_as!(Post, r#"DELETE FROM posts WHERE id = $1"#, id,)
+        .execute(&pool)
+        .await?;
 
     Ok(())
 }
 
 #[derive(Deserialize)]
-struct PostPutBody {
-    title: Option<String>,
-    content: Option<String>,
-    pinned: Option<bool>,
+struct PostPatchBody {
+    title: String,
+    content: String,
+    author: Option<i32>,
+    pinned: bool,
     department: Option<i32>,
     category: Option<i32>,
 }
 
-// TODO: Auth(teacher), check author/admin
 async fn put_post(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditPosts as i32 }>,
 
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
-    put_body: Json<PostPutBody>,
+    put_body: Json<PostPatchBody>,
 ) -> Result<Json<Post>, PhsError> {
     let post = sqlx::query_as!(
         Post,
@@ -156,15 +174,24 @@ async fn put_post(
                 content = $2,
                 pinned = $3,
                 department = $4,
-                category = $5
-            WHERE id = $6
-            RETURNING *
-            "#, //  AND (author = $7 OR $7 = 0)
+                category = $5,
+                author = $6
+            WHERE id = $7
+            RETURNING id,
+                title,
+                content,
+                pinned,
+                department,
+                category,
+                author,
+                date
+            "#,
         put_body.title,
         put_body.content,
         put_body.pinned,
         put_body.department,
         put_body.category,
+        put_body.author,
         id,
     )
     .fetch_one(&pool)

@@ -16,6 +16,7 @@ use tower_sessions::{
     service::{CookieController, PlaintextCookie},
     Session, SessionManager, SessionManagerLayer, SessionStore,
 };
+use tracing::Instrument;
 // use tracing::Instrument;
 
 use crate::error::PhsError;
@@ -51,7 +52,7 @@ where
     }
 
     fn call(&mut self, mut req: Request) -> Self::Future {
-        // let span = tracing::info_span!("call", user.id = tracing::field::Empty);
+        let span = tracing::info_span!("auth service");
 
         // let _backend = self.backend.clone();
         let data_key = self.data_key;
@@ -63,39 +64,35 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
-        Box::pin(async move {
-            let Some(session) = req.extensions().get::<Session>().cloned() else {
-                // tracing::error!("`Session` not found in request extensions");
-                return Ok(PhsError::INTERNAL.into_response());
-            };
+        Box::pin(
+            async move {
+                let Some(session) = req.extensions().get::<Session>().cloned() else {
+                    // tracing::error!("`Session` not found in request extensions");
+                    return Ok(PhsError::INTERNAL.into_response());
+                };
 
-            match AuthSession::from_session(session, data_key).await {
-                Ok(Some(auth_session)) => {
-                    req.extensions_mut().insert(auth_session);
+                match AuthSession::from_session(session, data_key).await {
+                    Ok(Some(auth_session)) => {
+                        req.extensions_mut().insert(auth_session);
+                    }
+                    Err(err) => {
+                        // tracing::error!("Error when converting Session to AuthSession");
+                        return Ok(err.into_response());
+                    }
+                    _ => {}
                 }
-                Err(err) => {
-                    // tracing::error!("Error when converting Session to AuthSession");
-                    return Ok(err.into_response());
-                }
-                _ => {}
+
+                // inner.call(req).await;
+                // }, // ,
+                // )
+                //
+                // // Call the inner service and get a future that resolves to the response
+                // We have to box the errors so the types match
+
+                inner.call(req).await
             }
-            // if let Some(auth_session) = ? {
-            //     req.extensions_mut().insert(auth_session);
-            // };
-
-            // if let Some(ref user) = auth_session.user {
-            //     tracing::Span::current().record("user.id", user.id);
-            // }
-
-            // inner.call(req).await;
-            // }, // .instrument(span),
-            // )
-            //
-            // // Call the inner service and get a future that resolves to the response
-            // We have to box the errors so the types match
-
-            inner.call(req).await
-        })
+            .instrument(span),
+        )
     }
 }
 
