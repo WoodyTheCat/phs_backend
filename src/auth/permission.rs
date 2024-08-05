@@ -31,7 +31,7 @@ macro_rules! i32_to_enum {
 }
 
 i32_to_enum!(
-    #[derive(PartialEq, Eq, Clone, sqlx::Type, Deserialize, Serialize)]
+    #[derive(PartialEq, Eq, Clone, Copy, sqlx::Type, Deserialize, Serialize, Debug)]
     #[non_exhaustive]
     #[sqlx(type_name = "permission", rename_all = "snake_case")]
     pub enum Permission {
@@ -64,7 +64,7 @@ impl<S, const PERMISSION: i32> FromRequestParts<S> for RequirePermission<PERMISS
             .ok_or(PhsError::UNAUTHORIZED)?;
 
         auth_session
-            .user()
+            .data()
             .permissions
             .contains(&PERMISSION.try_into().map_err(|_| PhsError::INTERNAL)?)
             .then_some(Self)

@@ -40,6 +40,7 @@ rmp-serde = "1.1.2"
 sha2 = "0.10.8"
 async-trait = "0.1.81"
 thiserror = "1.0.63"
+hex = "0.4.3"
 axum-core = "0.4.3"
 
 rand_chacha = { version = "0.3.1", features = [] }
@@ -78,4 +79,3 @@ tower-sessions = { path = "sessions/tower-sessions" }
 tower-sessions-core = { path = "sessions/tower-sessions-core" }
 rand_core.workspace = true
 rand_chacha.workspace = true
-hex = "0.4.3"

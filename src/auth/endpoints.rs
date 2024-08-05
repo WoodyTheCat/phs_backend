@@ -1,17 +1,18 @@
 use argon2::{password_hash, Argon2, PasswordHash, PasswordVerifier};
 use axum::{
-    debug_handler,
     extract::Query,
-    response::IntoResponse,
     routing::{get, post, put},
     Extension, Json, Router,
 };
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use tower_sessions::{IdType, Session};
+use tower_sessions::Session;
 
-use crate::{auth::Permission, error::PhsError, resources::User};
+use crate::{
+    auth::{AuthUser, Permission},
+    error::PhsError,
+    resources::User,
+};
 
 use super::{AuthSession, Group, RequirePermission};
 
@@ -34,18 +35,15 @@ struct PostLoginBody {
     password: String,
 }
 
-#[debug_handler]
 async fn login(
     session: Session,
     Extension(pool): Extension<PgPool>,
     Json(credentials): Json<PostLoginBody>,
-) -> Result<impl IntoResponse, PhsError> {
-    tracing::info!("Logging in");
-
+) -> Result<String, PhsError> {
     let user = sqlx::query_as!(
         User,
         r#"
-        SELECT id, name, username, role as "role: _", description, department, hash, permissions as "permissions: Vec<Permission>", sessions
+        SELECT id, name, username, role as "role: _", description, department, hash, permissions as "permissions: _"
         FROM users
         WHERE username = $1
         "#,
@@ -66,46 +64,64 @@ async fn login(
 
     // Credentials are correct as of here
 
-    session.insert(super::SESSION_DATA_KEY, &user).await?;
+    // Get the user's groups and permissions
+    let group_data = sqlx::query_as!(
+        Group,
+        r#"
+        SELECT id, group_name, permissions as "permissions: Vec<Permission>" FROM users_groups INNER JOIN groups ON groups.id = users_groups.group_id WHERE user_id = $1
+        "#,
+        user.id
+    ).fetch_all(&pool).await?;
 
+    let mut permissions = group_data
+        .iter()
+        .map(|gd| gd.permissions.iter())
+        .flatten()
+        .map(|p| *p)
+        .collect::<Vec<Permission>>();
+
+    // Add the user's override permissions to the vector
+    permissions.extend(&user.permissions);
+
+    let groups = group_data.into_iter().map(|gd| gd.group_name).collect();
+
+    let auth_user = AuthUser {
+        id: user.id,
+        hash: user.hash.clone(),
+        username: user.username.clone(),
+        permissions,
+        groups,
+    };
+
+    session.insert(super::SESSION_DATA_KEY, &auth_user).await?;
+
+    // Explicitly save the session so the ID is populated
+    session.save().await?;
+
+    let hashed_id = session.get_hashed_id().await.ok_or(PhsError::INTERNAL)?;
+
+    /*
     sqlx::query!(
         r#"UPDATE users SET sessions = array_append(sessions, $1) WHERE id = $2"#,
-        id_type_to_hash(session.id().await).ok_or(PhsError::INTERNAL)?,
+        hashed_id,
         user.id
     )
-    .fetch_one(&pool)
+    .fetch_optional(&pool)
     .await?;
+    */
 
-    Ok("Logged in!")
+    tracing::info!({ user = %user, hashed_id }, "Successful login");
+
+    Ok("Logged in!".into())
 }
 
-fn id_type_to_hash(id: IdType) -> Option<String> {
-    match id {
-        IdType::Id(id) | IdType::Unloaded(id) => Some(hex::encode(Sha256::digest(id.to_string()))),
-        _ => None,
-    }
+async fn whoami(session: AuthSession) -> Result<Json<i32>, PhsError> {
+    Ok(Json(session.auth_user.id))
 }
 
-async fn whoami(session: AuthSession) -> Result<String, PhsError> {
-    Ok(session.user.username)
-}
-
-async fn logout(
-    mut auth_session: AuthSession,
-    Extension(pool): Extension<PgPool>,
-) -> Result<(), PhsError> {
-    let user_id = auth_session.user.id;
-    let session_id = auth_session.session.id().await;
-
+/// Logout only the current session
+async fn logout(mut auth_session: AuthSession) -> Result<(), PhsError> {
     auth_session.destroy().await?;
-
-    sqlx::query!(
-        r#"UPDATE users SET sessions = array_remove(sessions, $1) WHERE id = $2"#,
-        id_type_to_hash(session_id).ok_or(PhsError::INTERNAL)?,
-        user_id
-    )
-    .fetch_one(&pool)
-    .await?;
 
     Ok(())
 }

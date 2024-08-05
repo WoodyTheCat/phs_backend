@@ -1,8 +1,7 @@
+use ::serde::{Deserialize, Serialize};
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use tokio::sync::Mutex;
@@ -13,7 +12,7 @@ use fred::{
     prelude::KeysInterface,
     types::{Expiration, SetOptions},
 };
-use time::OffsetDateTime;
+use time::{serde, OffsetDateTime};
 use tower_sessions_core::{session::Id, session_store, SessionStore};
 
 #[derive(Debug)]
@@ -59,21 +58,20 @@ impl<C: KeysInterface + Send + Sync> RedisStore<C> {
             data.expiry_date(),
         )));
 
-        let t = id.to_string();
-
-        tracing::debug!("Id before hashing: {}", t);
-
-        let hashed_id = hex::encode(Sha256::digest(t));
-
-        tracing::debug!("Id after hashing: {}", hashed_id);
+        let hashed_id = id.hash_id();
+        /*
+                        rmp_serde::to_vec(&SessionStoreData::from(data))
+                            .map_err(RedisStoreError::Encode)?
+                            .as_slice(),
+        */
 
         Ok(self
             .client
             .set(
                 hashed_id,
-                rmp_serde::to_vec(&SessionStoreData::from(data))
-                    .map_err(RedisStoreError::Encode)?
-                    .as_slice(),
+                serde_json::to_string(&SessionStoreData::from(data)).map_err(|_| {
+                    session_store::Error::Backend("Error whilst serialising to JSON".into())
+                })?,
                 expire,
                 options,
                 false,
@@ -126,7 +124,7 @@ where
     }
 
     async fn load(&self, session_id: &Id) -> session_store::Result<Option<SessionData>> {
-        let hashed_id = hex::encode(Sha256::digest(session_id.to_string()));
+        let hashed_id = session_id.hash_id();
 
         let data = self
             .client
@@ -135,8 +133,9 @@ where
             .map_err(RedisStoreError::Redis)?;
 
         if let Some(data) = data {
-            let value: SessionStoreData =
-                rmp_serde::from_slice(&data).map_err(RedisStoreError::Decode)?;
+            let value: SessionStoreData = serde_json::from_slice(&data).map_err(|_| {
+                session_store::Error::Backend("Error whilst deserialising JSON".into())
+            })?;
 
             Ok(Some(SessionData::new(
                 *session_id,
@@ -149,7 +148,7 @@ where
     }
 
     async fn delete(&self, session_id: &Id) -> session_store::Result<()> {
-        let hashed_id = hex::encode(Sha256::digest(session_id.to_string()));
+        let hashed_id = session_id.hash_id();
 
         self.client
             .del(hashed_id)

@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Initiate logging
     tracing_subscriber::registry()
         .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
-            |_| "trace,tower_sessions=trace,sqlx=warn,tower_http=debug,fred=info".into(),
+            |_| "trace,tower_sessions=trace,sqlx=warn,fred=info".into(),
         )))
         .with(tracing_subscriber::fmt::layer())
         .try_init()?;

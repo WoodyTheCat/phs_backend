@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 
 use argon2::{
     password_hash,
@@ -11,6 +11,7 @@ use axum::{
     routing::get,
     Extension, Json, Router,
 };
+use fred::clients::RedisPool;
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, PgPool};
 
@@ -23,6 +24,7 @@ use super::Department;
 
 #[derive(Serialize, Deserialize, sqlx::Type, Debug, Clone, PartialEq, Eq)]
 #[sqlx(type_name = "role", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     Teacher,
     Admin,
@@ -33,7 +35,6 @@ pub struct User {
     pub id: i32,
     pub username: String,
     pub hash: String, // A PHC-format hash string of the user's password
-    pub sessions: Vec<String>,
 
     pub name: String,
     pub role: Role,
@@ -44,24 +45,13 @@ pub struct User {
     pub permissions: Vec<Permission>,
 }
 
-// impl User {
-//     pub async fn logout(&mut self, pool: PgPool, ) -> Result<(), PhsError> {
-//         struct SessionsWrapped {
-//             sessions: Vec<String>,
-//         }
+impl Display for User {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "User {}", self.id)
+    }
+}
 
-//         let SessionsWrapped { sessions } = sqlx::query_as!(
-//             SessionsWrapped,
-//             r#"SELECT sessions FROM users WHERE id = $1"#,
-//             self.id
-//         )
-//         .fetch_one(&pool)
-//         .await?;
-
-//         Ok(())
-//     }
-// }
-
+/*
 impl Debug for User {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("User")
@@ -74,6 +64,7 @@ impl Debug for User {
             .finish()
     }
 }
+*/
 
 pub fn router() -> Router {
     Router::new()
@@ -197,7 +188,6 @@ struct UserNoHash {
 
     role: Role,
     permissions: Vec<Permission>,
-    sessions: Vec<String>,
 }
 
 async fn get_users(
@@ -215,8 +205,7 @@ async fn get_users(
             role as "role: _",
             description,
             department,
-            permissions as "permissions: _",
-            sessions
+            permissions as "permissions: _"
         FROM users
         "#,
     )
@@ -278,17 +267,19 @@ struct ChangePasswordBody {
     new_password: String,
 }
 
+// TODO: Implement a way to completely log out a user -> Delete multiple from RedisPool
 async fn change_password(
     mut auth_session: AuthSession,
     Extension(pool): Extension<PgPool>,
+    Extension(redis_pool): Extension<RedisPool>,
     Json(body): Json<ChangePasswordBody>,
 ) -> Result<(), PhsError> {
-    let user = auth_session.user();
+    let user_data = auth_session.data();
 
     Argon2::default()
         .verify_password(
             body.current_password.as_bytes(),
-            &PasswordHash::new(user.hash.as_str())?,
+            &PasswordHash::new(user_data.hash())?,
         )
         .map_err(|e| match e {
             password_hash::Error::Password => PhsError::UNAUTHORIZED,
@@ -304,35 +295,21 @@ async fn change_password(
         )?
         .to_string();
 
-    let old_sessions = sqlx::query_scalar!(
+    // TODO: Clear all sessions other than this one
+
+    sqlx::query!(
         r#"
         UPDATE users
-        SET sessions = array[]::text[],
-            hash = $1
-        FROM  (SELECT sessions FROM users WHERE id = $2 FOR UPDATE) old
-        WHERE  users.id = $2
-        RETURNING old.sessions
+        SET hash = $1
+        WHERE users.id = $2
         "#,
         new_hash,
-        user.id
+        user_data.id()
     )
     .fetch_one(&pool)
     .await?;
 
-    let old_sessions = sqlx::query_scalar!(
-        r#"
-        UPDATE users
-        SET sessions = array[]::text[]
-        FROM  (SELECT sessions FROM users WHERE id = $1 FOR UPDATE) old
-        WHERE  users.id = $1
-        RETURNING old.sessions
-        "#,
-        user.id
-    )
-    .fetch_one(&pool)
-    .await?;
-
-    auth_session.destroy().await?;
+    // auth_session.destroy().await?;
 
     Ok(())
 }

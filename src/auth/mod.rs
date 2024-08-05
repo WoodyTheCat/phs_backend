@@ -1,8 +1,9 @@
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
 
+use serde::{Deserialize, Serialize};
 use tower_sessions::Session;
 
-use crate::{error::PhsError, resources::User};
+use crate::error::PhsError;
 
 mod endpoints;
 mod permission;
@@ -14,7 +15,7 @@ pub use permission::{Group, Permission, RequirePermission};
 pub use redis_sessions::RedisStore;
 pub use service::AuthManagerLayer;
 
-pub const SESSION_DATA_KEY: &str = "phs.user";
+pub const SESSION_DATA_KEY: &str = "phs.auth_user";
 
 #[async_trait]
 impl<S> FromRequestParts<S> for AuthSession {
@@ -32,7 +33,40 @@ impl<S> FromRequestParts<S> for AuthSession {
 #[derive(Clone)]
 pub struct AuthSession {
     session: Session,
-    user: User,
+    auth_user: AuthUser,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AuthUser {
+    id: i32,
+
+    username: String,
+    hash: String,
+
+    permissions: Vec<Permission>,
+    groups: Vec<String>,
+}
+
+impl AuthUser {
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub fn hash(&self) -> &str {
+        &self.hash
+    }
+
+    pub fn permissions(&self) -> &[Permission] {
+        &self.permissions
+    }
+
+    pub fn groups(&self) -> &[String] {
+        &self.groups
+    }
 }
 
 impl<'a> AuthSession {
@@ -40,19 +74,18 @@ impl<'a> AuthSession {
         self.session.flush().await.map_err(Into::into)
     }
 
-    pub fn user(&self) -> &User {
-        &self.user
+    pub fn data(&self) -> &AuthUser {
+        &self.auth_user
     }
 
-    pub(crate) async fn from_session(
+    pub async fn from_session(
         session: Session,
-        // backend: impl AuthBackend,
         user_key: &'a str,
     ) -> Result<Option<Self>, PhsError> {
         let s = session
             .get(user_key)
             .await?
-            .map(|user| Self { user, session });
+            .map(|auth_user| Self { auth_user, session });
 
         Ok(s)
 

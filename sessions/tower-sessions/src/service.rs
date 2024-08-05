@@ -224,11 +224,7 @@ where
                 let should_save = session.should_save().await;
                 let empty = session.is_empty().await;
 
-                tracing::trace!(
-                    should_save = should_save,
-                    empty = empty,
-                    "Session response state"
-                );
+                tracing::debug!(session_cookie = ?session_cookie, "Session cookie:");
 
                 match session_cookie {
                     Some(mut cookie) if empty => {
@@ -247,6 +243,8 @@ where
                     }
 
                     _ if should_save && !res.status().is_server_error() => {
+                        tracing::trace!("Saving");
+
                         if let Err(err) = if empty {
                             session.delete().await
                         } else {

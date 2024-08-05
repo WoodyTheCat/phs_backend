@@ -17,7 +17,6 @@ use tower_sessions::{
     Session, SessionManager, SessionManagerLayer, SessionStore,
 };
 use tracing::Instrument;
-// use tracing::Instrument;
 
 use crate::error::PhsError;
 
@@ -67,7 +66,7 @@ where
         Box::pin(
             async move {
                 let Some(session) = req.extensions().get::<Session>().cloned() else {
-                    // tracing::error!("`Session` not found in request extensions");
+                    tracing::error!("`Session` not found in request extensions");
                     return Ok(PhsError::INTERNAL.into_response());
                 };
 
@@ -75,19 +74,12 @@ where
                     Ok(Some(auth_session)) => {
                         req.extensions_mut().insert(auth_session);
                     }
-                    Err(err) => {
-                        // tracing::error!("Error when converting Session to AuthSession");
-                        return Ok(err.into_response());
+                    Err(e) => {
+                        tracing::error!(?e, "Error when converting Session to AuthSession");
+                        return Ok(e.into_response());
                     }
                     _ => {}
                 }
-
-                // inner.call(req).await;
-                // }, // ,
-                // )
-                //
-                // // Call the inner service and get a future that resolves to the response
-                // We have to box the errors so the types match
 
                 inner.call(req).await
             }

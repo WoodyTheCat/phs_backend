@@ -98,7 +98,7 @@ async fn new_post(
     Extension(pool): Extension<PgPool>,
     Json(body): Json<NewPostBody>,
 ) -> Result<Json<Post>, PhsError> {
-    let user = auth_session.user();
+    let user = auth_session.data();
 
     let post = sqlx::query_as!(
         Post,
@@ -123,7 +123,7 @@ async fn new_post(
             "#,
         body.title,
         body.content,
-        user.id,
+        user.id(),
         body.pinned,
         body.department,
         body.category,

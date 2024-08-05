@@ -8,8 +8,10 @@ use std::{
 };
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, DecodeError, Engine as _};
+use hex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
 
@@ -55,12 +57,6 @@ pub enum IdType {
     Id(Id),
 }
 
-impl Display for IdType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct SessionData {
     id: IdType,
@@ -104,20 +100,6 @@ impl Session {
     /// This method is lazy and does not invoke the overhead of talking to the
     /// backing store.
     pub fn new(session_id: Option<Id>, store: Arc<impl SessionStore>, expiry: Expiry) -> Self {
-        // let Some(id) = session_id else {
-        //     return Ok(Self {
-        //         session_data: Arc::new(Mutex::new(SessionData::new(expiry))),
-        //         store,
-        //     });
-        // };
-
-        // let Some(session_data) = store.load(&id).await.map_err(Error::Store)? else {
-        //     return Ok(Self {
-        //         session_data: Arc::new(Mutex::new(SessionData::new(expiry))),
-        //         store,
-        //     });
-        // };
-
         Self {
             session_data: Arc::new(Mutex::new(SessionData {
                 id: match session_id {
@@ -132,14 +114,17 @@ impl Session {
         }
     }
 
-    /// WARN: Remove
-    pub async fn get_session_data(&self) -> SessionData {
-        self.session_data.lock().await.clone()
+    pub async fn get_hashed_id(&self) -> Option<String> {
+        match self.id().await {
+            IdType::None => None,
+            IdType::Id(id) | IdType::Unloaded(id) => {
+                Some(hex::encode(Sha256::digest(id.to_string())))
+            }
+        }
     }
 
     #[tracing::instrument(skip(self), err)]
     async fn maybe_load(&self) -> Result<()> {
-        tracing::trace!("In maybe_load");
         // If the lazy load has been completed, early return
         let IdType::Unloaded(id) = self.session_data.lock().await.id else {
             return Ok(());
@@ -261,7 +246,7 @@ impl Session {
 
     /// Get the session ID.
     pub async fn id(&self) -> IdType {
-        self.session_data.lock().await.id
+        dbg!(self.session_data.lock().await.id)
     }
 
     /// Get the session expiry.
@@ -304,8 +289,8 @@ impl Session {
         } else {
             let id = self.store.create(session_data).await?;
             session_data.id = IdType::Id(id);
-            session_data.should_save = false;
         }
+        session_data.should_save = false;
 
         Ok(())
     }
@@ -334,7 +319,7 @@ impl Session {
         let id = self.id().await;
 
         if !matches!(id, IdType::Id(_) | IdType::Unloaded(_)) {
-            tracing::warn!({ %id } , "Called `Session::delete` with an IdType other than Id");
+            tracing::error!({ ?id } , "Called `Session::delete` with an IdType other than Id");
             return Ok(());
         };
 
@@ -400,6 +385,12 @@ impl Session {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, Hash, PartialEq)]
 pub struct Id(pub i128); // TODO: By this being public, it may be possible to override the
                          // session ID, which is undesirable.
+
+impl Id {
+    pub fn hash_id(&self) -> String {
+        hex::encode(Sha256::digest(self.to_string()))
+    }
+}
 
 impl Display for Id {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
