@@ -1,26 +1,28 @@
 #![warn(clippy::correctness, clippy::perf, clippy::suspicious)]
 #![forbid(unsafe_code)]
 
-use auth::{AuthManagerLayer, RedisStore};
+use auth::AuthManagerLayer;
 use axum::{Extension, Router};
-use fred::prelude::RedisPool;
+use deadpool_redis::Pool as RedisPool;
 use sqlx::PgPool;
 use std::error::Error;
 use time::Duration;
+use tower_http::cors::CorsLayer;
 
-use tower_sessions::{Expiry, SessionManagerLayer};
+use sessions::{Expiry, SessionManagerLayer, SessionStore};
 
 mod auth;
 mod error;
 mod resources;
+mod sessions;
 
 pub fn app(db: PgPool, redis_pool: RedisPool) -> Router {
-    let session_store = RedisStore::new(redis_pool.clone());
+    let session_store = SessionStore::new(redis_pool.clone());
     let session_manager_layer = SessionManagerLayer::new(session_store)
         .with_secure(true)
         .with_expiry(Expiry::OnInactivity(Duration::hours(2)));
 
-    let auth_layer = AuthManagerLayer::new(session_manager_layer, auth::SESSION_DATA_KEY);
+    let auth_layer = AuthManagerLayer::new(session_manager_layer);
 
     Router::new()
         .merge(resources::router())
@@ -28,6 +30,7 @@ pub fn app(db: PgPool, redis_pool: RedisPool) -> Router {
         .layer(Extension(db))
         .layer(Extension(redis_pool))
         .layer(auth_layer)
+        .layer(CorsLayer::permissive()) // TODO WARN: Change with a domain
 }
 
 pub async fn serve(db: PgPool, redis: RedisPool) -> Result<(), Box<dyn Error>> {

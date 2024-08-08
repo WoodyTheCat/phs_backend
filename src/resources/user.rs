@@ -6,13 +6,15 @@ use argon2::{
     Argon2, PasswordHash, PasswordVerifier,
 };
 use axum::{
+    debug_handler,
     extract::{Path, Query},
     http::StatusCode,
     routing::get,
     Extension, Json, Router,
 };
-use fred::clients::RedisPool;
+use deadpool_redis::Pool as RedisPool;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::{prelude::FromRow, PgPool};
 
 use crate::{
@@ -51,21 +53,6 @@ impl Display for User {
     }
 }
 
-/*
-impl Debug for User {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("User")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("username", &self.username)
-            .field("role", &self.role)
-            .field("description", &self.description)
-            .field("department", &self.department)
-            .finish()
-    }
-}
-*/
-
 pub fn router() -> Router {
     Router::new()
         .route("/v1/users", get(get_users).post(create_user))
@@ -73,6 +60,8 @@ pub fn router() -> Router {
             "/v1/users/:id",
             get(get_user).put(put_user).delete(delete_user),
         )
+        .route("/v1/users/change_password", get(change_password))
+        .route("/v1/users/reset_password", get(reset_password))
 }
 
 #[derive(Deserialize)]
@@ -262,14 +251,16 @@ async fn put_user(
     Ok(Json(user_no_hash))
 }
 
+#[derive(Deserialize)]
 struct ChangePasswordBody {
     current_password: String,
     new_password: String,
 }
 
 // TODO: Implement a way to completely log out a user -> Delete multiple from RedisPool
+#[debug_handler]
 async fn change_password(
-    mut auth_session: AuthSession,
+    auth_session: AuthSession,
     Extension(pool): Extension<PgPool>,
     Extension(redis_pool): Extension<RedisPool>,
     Json(body): Json<ChangePasswordBody>,
@@ -309,9 +300,41 @@ async fn change_password(
     .fetch_one(&pool)
     .await?;
 
-    // auth_session.destroy().await?;
+    let mut conn = redis_pool.get().await?;
+
+    let sessions: Vec<String> = redis::cmd("FT.SEARCH")
+        .arg("idx:sessionsUserId")
+        .arg(format!(r#""@id:[{0} {0}]""#, user_data.id()))
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+
+    let current_session_id = hex::encode(Sha256::digest(
+        auth_session
+            .session()
+            .get_hashed_id()
+            .await
+            .ok_or(PhsError::UNAUTHORIZED)?,
+    ));
+
+    let exclusive_sessions: Vec<String> = sessions
+        .into_iter()
+        .filter(|s| s != &current_session_id)
+        .collect();
+
+    redis::cmd("DEL")
+        .arg(exclusive_sessions)
+        .exec_async(&mut conn)
+        .await
+        .map_err(|_| PhsError::INTERNAL)?;
 
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct PostResetPasswordBody {
+    user_id: i32,
+    new_password: String,
 }
 
 async fn reset_password(
@@ -319,8 +342,47 @@ async fn reset_password(
     _: RequirePermission<{ Permission::ManageUsers as i32 }>,
 
     Extension(pool): Extension<PgPool>,
+    Extension(redis_pool): Extension<RedisPool>,
+
+    Json(body): Json<PostResetPasswordBody>,
 ) -> Result<(), PhsError> {
-    todo!()
+    let new_hash = Argon2::default()
+        .hash_password(
+            body.new_password.as_bytes(),
+            &SaltString::generate(&mut OsRng),
+        )?
+        .to_string();
+
+    // TODO: Clear all sessions other than this one
+
+    sqlx::query!(
+        r#"
+        UPDATE users
+        SET hash = $1
+        WHERE users.id = $2
+        "#,
+        new_hash,
+        body.user_id
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    let mut conn = redis_pool.get().await?;
+
+    let sessions: Vec<String> = redis::cmd("FT.SEARCH")
+        .arg("idx:sessionsUserId")
+        .arg(format!(r#""@id:[{0} {0}]""#, body.user_id))
+        .query_async(&mut conn)
+        .await
+        .unwrap();
+
+    redis::cmd("DEL")
+        .arg(sessions)
+        .exec_async(&mut conn)
+        .await
+        .map_err(|_| PhsError::INTERNAL)?;
+
+    Ok(())
 }
 
 async fn delete_user(

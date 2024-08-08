@@ -7,7 +7,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use http::{Request, Response};
+use axum::http::{Request, Response, StatusCode};
 use time::OffsetDateTime;
 
 #[cfg(any(feature = "signed", feature = "private"))]
@@ -15,13 +15,9 @@ use tower_cookies::Key;
 use tower_cookies::{cookie::SameSite, Cookie, CookieManager, Cookies};
 use tower_layer::Layer;
 use tower_service::Service;
-use tower_sessions_core::session::IdType;
 use tracing::Instrument;
 
-use crate::{
-    session::{self, Expiry},
-    Session, SessionStore,
-};
+use super::{session, Expiry, IdType, Session, SessionStore};
 
 #[doc(hidden)]
 pub trait CookieController: Clone + Send + 'static {
@@ -47,7 +43,7 @@ impl CookieController for PlaintextCookie {
         cookies.remove(cookie)
     }
 }
-
+/*
 #[doc(hidden)]
 #[cfg(feature = "signed")]
 #[derive(Debug, Clone)]
@@ -91,6 +87,7 @@ impl CookieController for PrivateCookie {
         cookies.private(&self.key).remove(cookie)
     }
 }
+*/
 
 #[derive(Debug, Clone)]
 struct SessionConfig<'a> {
@@ -130,7 +127,8 @@ impl<'a> SessionConfig<'a> {
 impl<'a> Default for SessionConfig<'a> {
     fn default() -> Self {
         Self {
-            name: "id".into(), /* See: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-id-name-fingerprinting */
+            /* See: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-id-name-fingerprinting */
+            name: "id".into(),
             http_only: true,
             same_site: SameSite::Strict,
             expiry: Expiry::OnSessionEnd,
@@ -143,27 +141,26 @@ impl<'a> Default for SessionConfig<'a> {
 
 /// A middleware that provides [`Session`] as a request extension.
 #[derive(Debug, Clone)]
-pub struct SessionManager<S, Store: SessionStore, C: CookieController = PlaintextCookie> {
+pub struct SessionManager<S, C: CookieController = PlaintextCookie> {
     inner: S,
-    session_store: Arc<Store>,
+    session_store: Arc<SessionStore>,
     session_config: SessionConfig<'static>,
     cookie_controller: C,
 }
 
-impl<S, Store: SessionStore> SessionManager<S, Store> {
-    /// Create a new [`SessionManager`].
-    pub fn new(inner: S, session_store: Store) -> Self {
-        Self {
-            inner,
-            session_store: Arc::new(session_store),
-            session_config: Default::default(),
-            cookie_controller: PlaintextCookie,
-        }
-    }
-}
+// impl<S> SessionManager<S> {
+//     /// Create a new [`SessionManager`].
+//     pub fn new(inner: S, session_store: SessionStore) -> Self {
+//         Self {
+//             inner,
+//             session_store: Arc::new(session_store),
+//             session_config: Default::default(),
+//             cookie_controller: PlaintextCookie,
+//         }
+//     }
+// }
 
-impl<ReqBody, ResBody, S, Store: SessionStore, C: CookieController> Service<Request<ReqBody>>
-    for SessionManager<S, Store, C>
+impl<ReqBody, ResBody, S, C: CookieController> Service<Request<ReqBody>> for SessionManager<S, C>
 where
     S: Service<Request<ReqBody>, Response = Response<ResBody>> + Clone + Send + 'static,
     S::Future: Send,
@@ -224,12 +221,8 @@ where
                 let should_save = session.should_save().await;
                 let empty = session.is_empty().await;
 
-                tracing::debug!(session_cookie = ?session_cookie, "Session cookie:");
-
                 match session_cookie {
                     Some(mut cookie) if empty => {
-                        tracing::debug!("Removing session cookie");
-
                         // Path and domain must be manually set to ensure a proper removal cookie is
                         // constructed.
                         //
@@ -243,8 +236,6 @@ where
                     }
 
                     _ if should_save && !res.status().is_server_error() => {
-                        tracing::trace!("Saving");
-
                         if let Err(err) = if empty {
                             session.delete().await
                         } else {
@@ -253,7 +244,7 @@ where
                             tracing::error!(err = %err, "Failed to save session");
 
                             let mut res = Response::default();
-                            *res.status_mut() = http::StatusCode::INTERNAL_SERVER_ERROR;
+                            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                             return Ok(res);
                         };
 
@@ -261,14 +252,12 @@ where
                             tracing::error!("Missing session id");
 
                             let mut res = Response::default();
-                            *res.status_mut() = http::StatusCode::INTERNAL_SERVER_ERROR;
+                            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                             return Ok(res);
                         };
 
                         let expiry = session.expiry().await;
                         let session_cookie = session_config.build_cookie(session_id, expiry);
-
-                        tracing::trace!("Adding session cookie to response");
                         cookie_controller.add(&cookies, session_cookie);
                     }
 
@@ -284,13 +273,13 @@ where
 
 /// A layer for providing [`Session`] as a request extension.
 #[derive(Debug, Clone)]
-pub struct SessionManagerLayer<Store: SessionStore, C: CookieController = PlaintextCookie> {
-    session_store: Arc<Store>,
+pub struct SessionManagerLayer<C: CookieController = PlaintextCookie> {
+    session_store: Arc<SessionStore>,
     session_config: SessionConfig<'static>,
     cookie_controller: C,
 }
 
-impl<Store: SessionStore, C: CookieController> SessionManagerLayer<Store, C> {
+impl<C: CookieController> SessionManagerLayer<C> {
     /// Configures the name of the cookie used for the session.
     /// The default value is `"id"`.
     ///
@@ -465,7 +454,7 @@ impl<Store: SessionStore, C: CookieController> SessionManagerLayer<Store, C> {
     }
 }
 
-impl<Store: SessionStore> SessionManagerLayer<Store> {
+impl SessionManagerLayer {
     /// Create a new [`SessionManagerLayer`] with the provided session store
     /// and default cookie configuration.
     ///
@@ -477,7 +466,7 @@ impl<Store: SessionStore> SessionManagerLayer<Store> {
     /// let session_store = MemoryStore::default();
     /// let session_service = SessionManagerLayer::new(session_store);
     /// ```
-    pub fn new(session_store: Store) -> Self {
+    pub fn new(session_store: SessionStore) -> Self {
         let session_config = SessionConfig::default();
 
         Self {
@@ -488,8 +477,8 @@ impl<Store: SessionStore> SessionManagerLayer<Store> {
     }
 }
 
-impl<S, Store: SessionStore, C: CookieController> Layer<S> for SessionManagerLayer<Store, C> {
-    type Service = CookieManager<SessionManager<S, Store, C>>;
+impl<S, C: CookieController> Layer<S> for SessionManagerLayer<C> {
+    type Service = CookieManager<SessionManager<S, C>>;
 
     fn layer(&self, inner: S) -> Self::Service {
         let session_manager = SessionManager {

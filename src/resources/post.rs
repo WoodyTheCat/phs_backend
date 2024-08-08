@@ -4,7 +4,8 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{prelude::FromRow, types::time::Date, PgPool};
+use sqlx::{prelude::FromRow, PgPool};
+use time::OffsetDateTime;
 
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
@@ -14,7 +15,10 @@ use crate::{
 pub fn router() -> Router {
     Router::new()
         .route("/v1/posts", get(get_posts).post(new_post))
-        .route("/v1/post/:id", delete(delete_post).put(put_post))
+        .route(
+            "/v1/post/:id",
+            delete(delete_post).put(put_post).get(get_post),
+        )
 }
 
 #[derive(FromRow, Serialize, Deserialize)]
@@ -25,7 +29,8 @@ pub struct Post {
     content: String,
 
     author: Option<i32>,
-    date: Date, // Defaults to creation date
+    #[serde(with = "time::serde::iso8601")]
+    date: OffsetDateTime, // Defaults to creation date
 
     pinned: bool,
     department: Option<i32>,
@@ -60,7 +65,7 @@ async fn get_posts(
                 department,
                 category,
                 author,
-                date
+                date as "date: _"
             FROM posts
             WHERE ($1::integer IS NULL OR author = $1)
               AND ($2::integer IS NULL OR category = $2)
@@ -80,6 +85,32 @@ async fn get_posts(
     .await?;
 
     Ok(Json(posts))
+}
+
+async fn get_post(
+    Extension(pool): Extension<PgPool>,
+    Path(id): Path<i32>,
+) -> Result<Json<Post>, PhsError> {
+    let post = sqlx::query_as!(
+        Post,
+        r#"
+        SELECT id,
+            title,
+            content,
+            pinned,
+            department,
+            category,
+            author,
+            date as "date: _"
+        FROM posts
+        WHERE id = $1
+        "#,
+        id,
+    )
+    .fetch_one(&pool)
+    .await?;
+
+    Ok(Json(post))
 }
 
 #[derive(Deserialize)]
@@ -119,7 +150,7 @@ async fn new_post(
                 department,
                 category,
                 author,
-                date
+                date as "date: _"
             "#,
         body.title,
         body.content,
@@ -184,7 +215,7 @@ async fn put_post(
                 department,
                 category,
                 author,
-                date
+                date as "date: _"
             "#,
         put_body.title,
         put_body.content,

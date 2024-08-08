@@ -2,10 +2,8 @@
 
 use std::error::Error;
 
-use fred::{
-    prelude::{ClientLike, RedisPool},
-    types::RedisConfig,
-};
+use deadpool_redis::{Config as RedisConfig, Runtime};
+
 use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -29,15 +27,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map_err(|_| "Failed to connect to DATABASE_URL")?;
     sqlx::migrate!().run(&db).await?;
 
-    // let mut cfg = Config::from_url(dotenv::var("REDIS_URL").map_err(|_| "REDIS_URL not set")?);
+    let redis_cfg =
+        RedisConfig::from_url(dotenv::var("REDIS_URL").map_err(|_| "REDIS_URL not set")?);
+    let redis_pool = redis_cfg.create_pool(Some(Runtime::Tokio1)).unwrap();
 
     // Create a Redis connpool
-    let redis_pool = RedisPool::new(RedisConfig::default(), None, None, None, 6)?;
-    let redis_conn = redis_pool.connect();
-    redis_pool.wait_for_connect().await?;
+    //let redis_pool = RedisPool::new(RedisConfig::default(), None, None, None, 6)?;
+    //let redis_conn = redis_pool.connect();
+    // redis_pool.wait_for_connect().await?;
 
     phs_backend::serve(db, redis_pool).await?;
 
-    redis_conn.await??;
     Ok(())
 }

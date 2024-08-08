@@ -72,7 +72,7 @@ impl<S, const PERMISSION: i32> FromRequestParts<S> for RequirePermission<PERMISS
     }
 }
 
-#[derive(Clone, FromRow, Serialize, Deserialize)]
+#[derive(Clone, FromRow, Serialize, Deserialize, Debug)]
 pub struct Group {
     pub id: i32,
     pub group_name: String,

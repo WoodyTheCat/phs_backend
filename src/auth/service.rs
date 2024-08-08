@@ -1,3 +1,6 @@
+use crate::sessions::{
+    CookieController, PlaintextCookie, Session, SessionManager, SessionManagerLayer,
+};
 use axum::{
     extract::Request,
     response::{IntoResponse, Response},
@@ -12,10 +15,6 @@ use std::{
 use tower_cookies::CookieManager;
 use tower_layer::Layer;
 use tower_service::Service;
-use tower_sessions::{
-    service::{CookieController, PlaintextCookie},
-    Session, SessionManager, SessionManagerLayer, SessionStore,
-};
 use tracing::Instrument;
 
 use crate::error::PhsError;
@@ -26,12 +25,11 @@ use super::AuthSession;
 #[derive(Debug, Clone)]
 pub struct AuthManager<S> {
     inner: S,
-    data_key: &'static str,
 }
 
 impl<S> AuthManager<S> {
-    pub fn new(inner: S, data_key: &'static str) -> Self {
-        Self { inner, data_key }
+    pub fn new(inner: S) -> Self {
+        Self { inner }
     }
 }
 
@@ -54,7 +52,6 @@ where
         let span = tracing::info_span!("auth service");
 
         // let _backend = self.backend.clone();
-        let data_key = self.data_key;
 
         // Because the inner service can panic until ready, we need to ensure we only
         // use the ready service.
@@ -70,7 +67,7 @@ where
                     return Ok(PhsError::INTERNAL.into_response());
                 };
 
-                match AuthSession::from_session(session, data_key).await {
+                match AuthSession::from_session(session).await {
                     Ok(Some(auth_session)) => {
                         req.extensions_mut().insert(auth_session);
                     }
@@ -89,28 +86,23 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub struct AuthManagerLayer<Sessions: SessionStore, C: CookieController = PlaintextCookie> {
-    session_manager_layer: SessionManagerLayer<Sessions, C>,
-    data_key: &'static str,
+pub struct AuthManagerLayer<C: CookieController = PlaintextCookie> {
+    session_manager_layer: SessionManagerLayer<C>,
 }
 
-impl<Sessions: SessionStore, C: CookieController> AuthManagerLayer<Sessions, C> {
-    pub(crate) fn new(
-        session_manager_layer: SessionManagerLayer<Sessions, C>,
-        data_key: &'static str,
-    ) -> Self {
+impl<C: CookieController> AuthManagerLayer<C> {
+    pub(crate) fn new(session_manager_layer: SessionManagerLayer<C>) -> Self {
         Self {
             session_manager_layer,
-            data_key,
         }
     }
 }
 
-impl<S, Sessions: SessionStore, C: CookieController> Layer<S> for AuthManagerLayer<Sessions, C> {
-    type Service = CookieManager<SessionManager<AuthManager<S>, Sessions, C>>;
+impl<S, C: CookieController> Layer<S> for AuthManagerLayer<C> {
+    type Service = CookieManager<SessionManager<AuthManager<S>, C>>;
 
     fn layer(&self, inner: S) -> Self::Service {
         self.session_manager_layer
-            .layer(AuthManager::new(inner, self.data_key))
+            .layer(AuthManager::<_>::new(inner))
     }
 }

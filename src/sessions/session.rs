@@ -1,43 +1,27 @@
 use std::{
-    collections::HashMap,
     fmt::{self, Display},
     hash::Hash,
-    result,
     str::{self, FromStr},
     sync::Arc,
 };
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, DecodeError, Engine as _};
-use hex;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::{Duration, OffsetDateTime};
 use tokio::sync::Mutex;
 
-use crate::{session_store, SessionStore};
+use crate::auth::AuthUser;
+
+use super::{Error, Result, SessionStore};
 
 const DEFAULT_DURATION: Duration = Duration::weeks(2);
-
-type Result<T> = result::Result<T, Error>;
-
-/// Session errors.
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    /// Maps `serde_json` errors.
-    #[error(transparent)]
-    SerdeJson(#[from] serde_json::Error),
-
-    /// Maps `session_store::Error` errors.
-    #[error(transparent)]
-    Store(#[from] session_store::Error),
-}
 
 /// A session which allows HTTP applications to associate key-value pairs with
 /// visitors.
 #[derive(Debug, Clone)]
 pub struct Session {
-    store: Arc<dyn SessionStore>,
+    store: Arc<SessionStore>,
 
     // This will be `None` when:
     //
@@ -60,7 +44,7 @@ pub enum IdType {
 #[derive(Debug, Clone)]
 pub struct SessionData {
     id: IdType,
-    data: HashMap<String, Value>,
+    data: Option<AuthUser>,
     expiry: Expiry,
     should_save: bool,
 }
@@ -74,7 +58,7 @@ impl SessionData {
         self.expiry.expiry_date()
     }
 
-    pub fn data(&self) -> HashMap<String, Value> {
+    pub fn data(&self) -> Option<AuthUser> {
         self.data.clone()
     }
 
@@ -84,7 +68,7 @@ impl SessionData {
 }
 
 impl SessionData {
-    pub fn new(id: Id, data: HashMap<String, Value>, expiry: Expiry) -> Self {
+    pub fn new(id: Id, data: Option<AuthUser>, expiry: Expiry) -> Self {
         Self {
             id: IdType::Unloaded(id),
             data,
@@ -99,14 +83,14 @@ impl Session {
     ///
     /// This method is lazy and does not invoke the overhead of talking to the
     /// backing store.
-    pub fn new(session_id: Option<Id>, store: Arc<impl SessionStore>, expiry: Expiry) -> Self {
+    pub fn new(session_id: Option<Id>, store: Arc<SessionStore>, expiry: Expiry) -> Self {
         Self {
             session_data: Arc::new(Mutex::new(SessionData {
                 id: match session_id {
                     Some(id) => IdType::Unloaded(id),
                     None => IdType::None,
                 },
-                data: HashMap::default(),
+                data: None,
                 expiry,
                 should_save: false,
             })),
@@ -139,12 +123,15 @@ impl Session {
             None => {
                 // Reaching this point indicates that the browser sent an expired cookie,
                 // it expired whilst in transit, or possible suspicious activity
-                tracing::warn!("Expired cookie received, possible suspicious actvity");
+                tracing::warn!(
+                    ?id,
+                    "Expired cookie received, did the store go down? Possible suspicious actvity"
+                );
                 let new_id = self.store.create(session_data).await?;
 
                 SessionData {
                     id: IdType::Id(new_id),
-                    data: HashMap::default(),
+                    data: None,
                     expiry: session_data.expiry,
                     should_save: false,
                 }
@@ -153,14 +140,14 @@ impl Session {
 
         Ok(())
     }
-
-    /// Inserts a `impl Serialize` value into the session.
-    pub async fn insert(&self, key: &str, value: impl Serialize) -> Result<()> {
-        self.insert_value(key, serde_json::to_value(&value)?)
-            .await?;
-        Ok(())
-    }
-
+    /*
+        /// Inserts a `impl Serialize` value into the session.
+        pub async fn insert(&self, key: &str, value: impl Serialize) -> Result<()> {
+            self.insert_value(key, serde_json::to_value(&value)?)
+                .await?;
+            Ok(())
+        }
+    */
     /// Inserts a `serde_json::Value` into the session.
     ///
     /// If the key was not present in the underlying map, `None` is returned and
@@ -168,19 +155,18 @@ impl Session {
     ///
     /// If the underlying map did have the key and its value is the same as the
     /// provided value, `None` is returned and `modified` is not set.
-    pub async fn insert_value(&self, key: &str, value: Value) -> Result<Option<Value>> {
+    pub async fn set(&self, value: AuthUser) -> Result<()> {
         self.maybe_load().await?;
 
         let session_data = &mut *self.session_data.lock().await;
 
-        Ok(if Some(&value) != session_data.data.get(key) {
-            session_data.should_save = true;
-            session_data.data.insert(key.to_string(), value)
-        } else {
-            None
-        })
+        session_data.should_save = true;
+        session_data.data = Some(value);
+
+        Ok(())
     }
 
+    /*
     /// Gets a value from the store.
     pub async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         Ok(self
@@ -189,16 +175,18 @@ impl Session {
             .map(serde_json::from_value)
             .transpose()?)
     }
+    */
 
-    /// Gets a `serde_json::Value` from the store.
-    pub async fn get_value(&self, key: &str) -> Result<Option<Value>> {
+    /// Gets an [`AuthUser`] from the store.
+    pub async fn get(&self) -> Result<Option<AuthUser>> {
         self.maybe_load().await?;
 
         let session_data = &*self.session_data.lock().await;
 
-        Ok(session_data.data.get(key).cloned())
+        Ok(session_data.data.clone())
     }
 
+    /*
     /// Removes a value from the store, retuning the value of the key if it was
     /// present in the underlying map.
     pub async fn remove<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
@@ -208,25 +196,24 @@ impl Session {
             .map(serde_json::from_value)
             .transpose()?)
     }
+    */
 
     /// Removes a `serde_json::Value` from the session.
-    pub async fn remove_value(&self, key: &str) -> Result<Option<Value>> {
+    pub async fn remove_value(&self) -> Result<()> {
         let session_data = &mut *self.session_data.lock().await;
 
-        Ok(match session_data.data.remove(key) {
-            some if some.is_some() => {
-                session_data.should_save = true;
-                some
-            }
-            _ => None,
-        })
+        if session_data.data.take().is_some() {
+            session_data.should_save = true;
+        }
+
+        Ok(())
     }
 
     /// Clears the session of all data but does not delete it from the store.
     pub async fn clear(&self) {
         let session_data = &mut *self.session_data.lock().await;
 
-        session_data.data.clear();
+        session_data.data = None;
         session_data.should_save = true;
     }
 
@@ -241,12 +228,12 @@ impl Session {
         // 3. It is in the process of being cycled
         let has_session_id = matches!(session_data.id, IdType::Id(..));
 
-        !has_session_id && session_data.data.is_empty()
+        !has_session_id && session_data.data.is_none()
     }
 
     /// Get the session ID.
     pub async fn id(&self) -> IdType {
-        dbg!(self.session_data.lock().await.id)
+        self.session_data.lock().await.id
     }
 
     /// Get the session expiry.
@@ -290,7 +277,9 @@ impl Session {
             let id = self.store.create(session_data).await?;
             session_data.id = IdType::Id(id);
         }
-        session_data.should_save = false;
+
+        // Actually, no. Doing this stops the session from being saved to a cookie
+        // session_data.should_save = false;
 
         Ok(())
     }
@@ -346,7 +335,7 @@ impl Session {
 
         *self.session_data.lock().await = SessionData {
             id: IdType::None,
-            data: HashMap::default(),
+            data: None,
             expiry,
             should_save: false,
         };
@@ -387,7 +376,7 @@ pub struct Id(pub i128); // TODO: By this being public, it may be possible to ov
                          // session ID, which is undesirable.
 
 impl Id {
-    pub fn hash_id(&self) -> String {
+    pub fn hashed_id(&self) -> String {
         hex::encode(Sha256::digest(self.to_string()))
     }
 }
@@ -407,7 +396,7 @@ impl Display for Id {
 impl FromStr for Id {
     type Err = base64::DecodeSliceError;
 
-    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let mut decoded = [0; 16];
         let bytes_decoded = URL_SAFE_NO_PAD.decode_slice(s.as_bytes(), &mut decoded)?;
         if bytes_decoded != 16 {
@@ -444,7 +433,7 @@ pub enum Expiry {
 
 impl Expiry {
     /// Get session expiry as `OffsetDateTime`.
-    fn expiry_date(&self) -> OffsetDateTime {
+    pub fn expiry_date(&self) -> OffsetDateTime {
         match self {
             Expiry::OnInactivity(duration) => OffsetDateTime::now_utc().saturating_add(*duration),
             Expiry::AtDateTime(datetime) => *datetime,

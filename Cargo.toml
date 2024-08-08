@@ -1,13 +1,17 @@
-[workspace]
-members = [".", "sessions/tower-sessions"]
-resolver = "2"
+# [workspace]
+# members = [".", "sessions/tower-sessions"]
+# resolver = "2"
 
-[workspace.package]
+# [workspace.package]
+
+[package]
+name = "phs_backend"
 version = "0.1.0"
 edition = "2021"
 authors = ["Fergus Rorke <fergusjr@proton.me>"]
 
-[workspace.dependencies]
+# [workspace.dependencies]
+[dependencies]
 time = { version = "0.3.36", default-features = false, features = [
     "formatting",
     "macros",
@@ -35,7 +39,6 @@ tower-service = "0.3.2"
 tower-cookies = "0.10.0"
 
 parking_lot = { version = "0.12.1", features = ["serde"] }
-fred = "9.0.3"
 rmp-serde = "1.1.2"
 sha2 = "0.10.8"
 async-trait = "0.1.81"
@@ -45,37 +48,39 @@ axum-core = "0.4.3"
 
 rand_chacha = { version = "0.3.1", features = [] }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
+base64 = "0.22.1"
+deadpool-redis = "0.16.0"
+redis = { version = "0.26.1", features = ["json", "tokio-native-tls"] }
+tower-http = { version = "0.5.2", features = ["cors"] }
 
-[package]
-name = "phs_backend"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
+# version.workspace = true
+# edition.workspace = true
+# authors.workspace = true
 
-[dependencies]
-time.workspace = true
-tokio.workspace = true
-axum.workspace = true
-dotenv.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-sqlx.workspace = true
+# [dependencies]
+# time.workspace = true
+# tokio.workspace = true
+# axum.workspace = true
+# dotenv.workspace = true
+# serde.workspace = true
+# serde_json.workspace = true
+# sqlx.workspace = true
 
-tracing.workspace = true
-tracing-subscriber.workspace = true
+# tracing.workspace = true
+# tracing-subscriber.workspace = true
 
-argon2.workspace = true
+# argon2.workspace = true
 
-tower.workspace = true
-tower-layer.workspace = true
-tower-service.workspace = true
-tower-cookies.workspace = true
+# tower.workspace = true
+# tower-layer.workspace = true
+# tower-service.workspace = true
+# tower-cookies.workspace = true
 
-parking_lot.workspace = true
-fred.workspace = true
-rmp-serde.workspace = true
-sha2.workspace = true
-tower-sessions = { path = "sessions/tower-sessions" }
-tower-sessions-core = { path = "sessions/tower-sessions-core" }
-rand_core.workspace = true
-rand_chacha.workspace = true
+# parking_lot.workspace = true
+# fred.workspace = true
+# rmp-serde.workspace = true
+# sha2.workspace = true
+# tower-sessions = { path = "sessions/tower-sessions" }
+# tower-sessions-core = { path = "sessions/tower-sessions-core" }
+# rand_core.workspace = true
+# rand_chacha.workspace = true

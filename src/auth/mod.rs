@@ -1,21 +1,17 @@
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
 
 use serde::{Deserialize, Serialize};
-use tower_sessions::Session;
 
 use crate::error::PhsError;
+use crate::sessions::Session;
 
 mod endpoints;
 mod permission;
-mod redis_sessions;
 mod service;
 
 pub use endpoints::router;
 pub use permission::{Group, Permission, RequirePermission};
-pub use redis_sessions::RedisStore;
 pub use service::AuthManagerLayer;
-
-pub const SESSION_DATA_KEY: &str = "phs.auth_user";
 
 #[async_trait]
 impl<S> FromRequestParts<S> for AuthSession {
@@ -36,7 +32,7 @@ pub struct AuthSession {
     auth_user: AuthUser,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct AuthUser {
     id: i32,
 
@@ -70,6 +66,10 @@ impl AuthUser {
 }
 
 impl<'a> AuthSession {
+    pub fn session(&self) -> Session {
+        self.session.clone()
+    }
+
     pub async fn destroy(&mut self) -> Result<(), PhsError> {
         self.session.flush().await.map_err(Into::into)
     }
@@ -78,12 +78,9 @@ impl<'a> AuthSession {
         &self.auth_user
     }
 
-    pub async fn from_session(
-        session: Session,
-        user_key: &'a str,
-    ) -> Result<Option<Self>, PhsError> {
+    pub async fn from_session(session: Session) -> Result<Option<Self>, PhsError> {
         let s = session
-            .get(user_key)
+            .get()
             .await?
             .map(|auth_user| Self { auth_user, session });
 

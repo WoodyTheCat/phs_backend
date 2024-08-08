@@ -83,10 +83,6 @@
 //! deleting expired sessions at a specified interval.
 use std::fmt::Debug;
 
-use async_trait::async_trait;
-
-use crate::session::{Id, SessionData};
-
 /// Stores must map any errors that might occur during their use to this type.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -100,16 +96,17 @@ pub enum Error {
     Backend(String),
 
     #[error("Rng failed with: {0}")]
-    Rng(#[from] rand::Error),
+    Rng(#[from] rand_core::Error),
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+// Defines the interface for session management.
+//
+// See [`session_store`](crate::session_store) for more details.
 
-/// Defines the interface for session management.
-///
-/// See [`session_store`](crate::session_store) for more details.
+/*
 #[async_trait]
-pub trait SessionStore: Debug + Send + Sync + 'static {
+pub trait SessionStore: Debug + Send + Sync + Clone + 'static {
+    type Error: Send + Sync + std::error::Error;
     /// Creates a new session in the store with the provided session record.
     ///
     /// Implementers must decide how to handle potential ID collisions. For
@@ -138,30 +135,32 @@ pub trait SessionStore: Debug + Send + Sync + 'static {
 
     async fn new_id(&self) -> Result<Id>;
 }
+*/
 
-/// Provides a layered caching mechanism with a cache as the frontend and a
-/// store as the backend.
-///
-/// Contains both a cache, which acts as a frontend, and a store which acts as a
-/// backend. Both cache and store implement `SessionStore`.
-///
-/// By using a cache, the cost of reads can be greatly reduced as once cached,
-/// reads need only interact with the frontend, forgoing the cost of retrieving
-/// the session record from the backend.
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// # tokio_test::block_on(async {
-/// use tower_sessions::CachingSessionStore;
-/// use tower_sessions_moka_store::MokaStore;
-/// use tower_sessions_sqlx_store::{SqlitePool, SqliteStore};
-/// let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-/// let sqlite_store = SqliteStore::new(pool);
-/// let moka_store = MokaStore::new(Some(2_000));
-/// let caching_store = CachingSessionStore::new(moka_store, sqlite_store);
-/// # })
-/// ```
+// Provides a layered caching mechanism with a cache as the frontend and a
+// store as the backend.
+//
+// Contains both a cache, which acts as a frontend, and a store which acts as a
+// backend. Both cache and store implement `SessionStore`.
+//
+// By using a cache, the cost of reads can be greatly reduced as once cached,
+// reads need only interact with the frontend, forgoing the cost of retrieving
+// the session record from the backend.
+//
+// # Examples
+//
+// ```rust,ignore
+// # tokio_test::block_on(async {
+// use tower_sessions::CachingSessionStore;
+// use tower_sessions_moka_store::MokaStore;
+// use tower_sessions_sqlx_store::{SqlitePool, SqliteStore};
+// let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+// let sqlite_store = SqliteStore::new(pool);
+// let moka_store = MokaStore::new(Some(2_000));
+// let caching_store = CachingSessionStore::new(moka_store, sqlite_store);
+// # })
+// ```
+
 // #[derive(Debug, Clone)]
 // pub struct CachingSessionStore<Cache: SessionStore, Store: SessionStore> {
 //     cache: Cache,
@@ -228,52 +227,3 @@ pub trait SessionStore: Debug + Send + Sync + 'static {
 //         Ok(())
 //     }
 // }
-
-/// Provides a method for deleting expired sessions.
-#[async_trait]
-pub trait ExpiredDeletion: SessionStore
-where
-    Self: Sized,
-{
-    /// A method for deleting expired sessions from the store.
-    async fn delete_expired(&self) -> Result<()>;
-
-    /// This function will keep running indefinitely, deleting expired rows and
-    /// then waiting for the specified period before deleting again.
-    ///
-    /// Generally this will be used as a task, for example via
-    /// `tokio::task::spawn`.
-    ///
-    /// # Errors
-    ///
-    /// This function returns a `Result` that contains an error of type
-    /// `sqlx::Error` if the deletion operation fails.
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run,ignore
-    /// use tower_sessions::session_store::ExpiredDeletion;
-    /// use tower_sessions_sqlx_store::{sqlx::SqlitePool, SqliteStore};
-    ///
-    /// # {
-    /// # tokio_test::block_on(async {
-    /// let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    /// let session_store = SqliteStore::new(pool);
-    ///
-    /// tokio::task::spawn(
-    ///     session_store
-    ///         .clone()
-    ///         .continuously_delete_expired(tokio::time::Duration::from_secs(60)),
-    /// );
-    /// # })
-    /// ```
-    #[cfg(feature = "deletion-task")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "deletion-task")))]
-    async fn continuously_delete_expired(self, period: tokio::time::Duration) -> Result<()> {
-        let mut interval = tokio::time::interval(period);
-        loop {
-            self.delete_expired().await?;
-            interval.tick().await;
-        }
-    }
-}

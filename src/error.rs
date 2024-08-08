@@ -3,6 +3,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
+use crate::sessions;
+
 #[derive(Debug)]
 pub struct PhsError(pub StatusCode, pub &'static str);
 
@@ -55,8 +57,8 @@ impl From<tokio::task::JoinError> for PhsError {
     }
 }
 
-impl From<tower_sessions::session::Error> for PhsError {
-    fn from(e: tower_sessions::session::Error) -> Self {
+impl From<sessions::Error> for PhsError {
+    fn from(e: sessions::Error) -> Self {
         tracing::error!(e = %e, "Sessions Error");
         Self::INTERNAL
     }
@@ -66,5 +68,12 @@ impl From<(StatusCode, &'static str)> for PhsError {
     fn from(e: (StatusCode, &'static str)) -> Self {
         tracing::error!("({}, {})", e.0, e.1);
         Self(e.0, e.1)
+    }
+}
+
+impl From<deadpool_redis::PoolError> for PhsError {
+    fn from(e: deadpool_redis::PoolError) -> Self {
+        tracing::error!(?e, "Pool error");
+        Self::INTERNAL
     }
 }

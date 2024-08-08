@@ -1,3 +1,4 @@
+use super::Session;
 use argon2::{password_hash, Argon2, PasswordHash, PasswordVerifier};
 use axum::{
     extract::Query,
@@ -6,7 +7,6 @@ use axum::{
 };
 use serde::Deserialize;
 use sqlx::PgPool;
-use tower_sessions::Session;
 
 use crate::{
     auth::{AuthUser, Permission},
@@ -68,16 +68,21 @@ async fn login(
     let group_data = sqlx::query_as!(
         Group,
         r#"
-        SELECT id, group_name, permissions as "permissions: Vec<Permission>" FROM users_groups INNER JOIN groups ON groups.id = users_groups.group_id WHERE user_id = $1
+        SELECT id, group_name, permissions as "permissions: _"
+        FROM users_groups
+        INNER JOIN groups
+        ON groups.id = users_groups.group_id
+        WHERE user_id = $1
         "#,
         user.id
-    ).fetch_all(&pool).await?;
+    )
+    .fetch_all(&pool)
+    .await?;
 
     let mut permissions = group_data
         .iter()
-        .map(|gd| gd.permissions.iter())
-        .flatten()
-        .map(|p| *p)
+        .flat_map(|gd| gd.permissions.iter())
+        .copied()
         .collect::<Vec<Permission>>();
 
     // Add the user's override permissions to the vector
@@ -93,24 +98,14 @@ async fn login(
         groups,
     };
 
-    session.insert(super::SESSION_DATA_KEY, &auth_user).await?;
+    session.set(auth_user).await?;
 
     // Explicitly save the session so the ID is populated
     session.save().await?;
 
     let hashed_id = session.get_hashed_id().await.ok_or(PhsError::INTERNAL)?;
 
-    /*
-    sqlx::query!(
-        r#"UPDATE users SET sessions = array_append(sessions, $1) WHERE id = $2"#,
-        hashed_id,
-        user.id
-    )
-    .fetch_optional(&pool)
-    .await?;
-    */
-
-    tracing::info!({ user = %user, hashed_id }, "Successful login");
+    tracing::info!({ user = ?user.id, hashed_id }, "Successful login");
 
     Ok("Logged in!".into())
 }
