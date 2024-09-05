@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, PgPool};
+use tracing::instrument;
 
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
@@ -31,6 +32,7 @@ pub fn router() -> Router {
         )
 }
 
+#[instrument(skip(pool))]
 async fn get_departments(
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<Vec<Department>>, PhsError> {
@@ -44,6 +46,7 @@ async fn get_departments(
     Ok(Json(departments))
 }
 
+#[instrument(skip(pool))]
 async fn get_department(
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -59,11 +62,12 @@ async fn get_department(
     Ok(Json(department))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct CreateDepartmentBody {
     department: String,
 }
 
+#[instrument(skip(pool, _auth_session))]
 async fn create_department(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditDepartments as i32 }>,
@@ -86,11 +90,12 @@ async fn create_department(
     Ok(Json(department))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct PutDepartmentBody {
     new: String,
 }
 
+#[instrument(skip(pool, _auth_session))]
 async fn put_department(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditDepartments as i32 }>,
@@ -116,6 +121,7 @@ async fn put_department(
     Ok(Json(department))
 }
 
+#[instrument(skip(pool, _auth_session))]
 async fn delete_department(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditDepartments as i32 }>,

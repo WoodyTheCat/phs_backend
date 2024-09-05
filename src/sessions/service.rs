@@ -10,12 +10,9 @@ use std::{
 use axum::http::{Request, Response, StatusCode};
 use time::OffsetDateTime;
 
-#[cfg(any(feature = "signed", feature = "private"))]
-use tower_cookies::Key;
-use tower_cookies::{cookie::SameSite, Cookie, CookieManager, Cookies};
+use tower_cookies::{cookie::SameSite, Cookie, CookieManager, Cookies, Key};
 use tower_layer::Layer;
 use tower_service::Service;
-use tracing::Instrument;
 
 use super::{session, Expiry, IdType, Session, SessionStore};
 
@@ -28,6 +25,7 @@ pub trait CookieController: Clone + Send + 'static {
 
 #[doc(hidden)]
 #[derive(Debug, Clone)]
+#[cfg(not(feature = "signed"))]
 pub struct PlaintextCookie;
 
 impl CookieController for PlaintextCookie {
@@ -36,61 +34,58 @@ impl CookieController for PlaintextCookie {
     }
 
     fn add(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-        cookies.add(cookie)
+        cookies.add(cookie);
     }
 
     fn remove(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-        cookies.remove(cookie)
+        cookies.remove(cookie);
     }
 }
-/*
+
 #[doc(hidden)]
-#[cfg(feature = "signed")]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[cfg(feature = "signed_cookies")]
 pub struct SignedCookie {
     key: Key,
 }
 
-#[cfg(feature = "signed")]
+#[cfg(feature = "signed_cookies")]
 impl CookieController for SignedCookie {
     fn get(&self, cookies: &Cookies, name: &str) -> Option<Cookie<'static>> {
         cookies.signed(&self.key).get(name).map(Cookie::into_owned)
     }
 
     fn add(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-        cookies.signed(&self.key).add(cookie)
+        cookies.signed(&self.key).add(cookie);
     }
 
     fn remove(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-        cookies.signed(&self.key).remove(cookie)
+        cookies.signed(&self.key).remove(cookie);
     }
 }
-
-#[doc(hidden)]
-#[cfg(feature = "private")]
-#[derive(Debug, Clone)]
-pub struct PrivateCookie {
-    key: Key,
-}
-
-#[cfg(feature = "private")]
-impl CookieController for PrivateCookie {
-    fn get(&self, cookies: &Cookies, name: &str) -> Option<Cookie<'static>> {
-        cookies.private(&self.key).get(name).map(Cookie::into_owned)
-    }
-
-    fn add(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-        cookies.private(&self.key).add(cookie)
-    }
-
-    fn remove(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-        cookies.private(&self.key).remove(cookie)
-    }
-}
-*/
+//
+//#[doc(hidden)]
+//#[derive(Debug, Clone)]
+//pub struct PrivateCookie {
+//    key: Key,
+//}
+//
+//impl CookieController for PrivateCookie {
+//    fn get(&self, cookies: &Cookies, name: &str) -> Option<Cookie<'static>> {
+//        cookies.private(&self.key).get(name).map(Cookie::into_owned)
+//    }
+//
+//    fn add(&self, cookies: &Cookies, cookie: Cookie<'static>) {
+//        cookies.private(&self.key).add(cookie)
+//    }
+//
+//    fn remove(&self, cookies: &Cookies, cookie: Cookie<'static>) {
+//        cookies.private(&self.key).remove(cookie)
+//    }
+//}
 
 #[derive(Debug, Clone)]
-struct SessionConfig<'a> {
+pub struct SessionConfig<'a> {
     name: Cow<'a, str>,
     http_only: bool,
     same_site: SameSite,
@@ -140,8 +135,8 @@ impl<'a> Default for SessionConfig<'a> {
 }
 
 /// A middleware that provides [`Session`] as a request extension.
-#[derive(Debug, Clone)]
-pub struct SessionManager<S, C: CookieController = PlaintextCookie> {
+#[derive(Clone)]
+pub struct SessionManager<S, C: CookieController> {
     inner: S,
     session_store: Arc<SessionStore>,
     session_config: SessionConfig<'static>,
@@ -177,7 +172,7 @@ where
     }
 
     fn call(&mut self, mut req: Request<ReqBody>) -> Self::Future {
-        let span = tracing::trace_span!("Session service");
+        //let span = tracing::trace_span!("Session service");
 
         let session_store = self.session_store.clone();
         let session_config = self.session_config.clone();
@@ -207,7 +202,7 @@ where
                             tracing::warn!(
                                 err = %err,
                                 "Malformed session id, possible suspicious activity"
-                            )
+                            );
                         })
                         .ok()
                 });
@@ -232,6 +227,8 @@ where
                             cookie.set_domain(domain);
                         }
 
+                        tracing::trace!("Removing empty or invalid cookie from client");
+
                         cookie_controller.remove(&cookies, cookie);
                     }
 
@@ -243,17 +240,17 @@ where
                         } {
                             tracing::error!(err = %err, "Failed to save session");
 
-                            let mut res = Response::default();
-                            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                            return Ok(res);
+                            let mut response = Response::default();
+                            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                            return Ok(response);
                         };
 
                         let IdType::Id(session_id) = session.id().await else {
                             tracing::error!("Missing session id");
 
-                            let mut res = Response::default();
-                            *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                            return Ok(res);
+                            let mut response = Response::default();
+                            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                            return Ok(response);
                         };
 
                         let expiry = session.expiry().await;
@@ -265,15 +262,15 @@ where
                 };
 
                 Ok(res)
-            }
-            .instrument(span),
+            }, // TODO Span here without wrapping all errors
+               //.instrument(span),
         )
     }
 }
 
 /// A layer for providing [`Session`] as a request extension.
-#[derive(Debug, Clone)]
-pub struct SessionManagerLayer<C: CookieController = PlaintextCookie> {
+#[derive(Clone)]
+pub struct SessionManagerLayer<C: CookieController> {
     session_store: Arc<SessionStore>,
     session_config: SessionConfig<'static>,
     cookie_controller: C,
@@ -313,7 +310,7 @@ impl<C: CookieController> SessionManagerLayer<C> {
     /// let session_store = MemoryStore::default();
     /// let session_service = SessionManagerLayer::new(session_store).with_http_only(true);
     /// ```
-    pub fn with_http_only(mut self, http_only: bool) -> Self {
+    pub const fn with_http_only(mut self, http_only: bool) -> Self {
         self.session_config.http_only = http_only;
         self
     }
@@ -330,7 +327,7 @@ impl<C: CookieController> SessionManagerLayer<C> {
     /// let session_store = MemoryStore::default();
     /// let session_service = SessionManagerLayer::new(session_store).with_same_site(SameSite::Lax);
     /// ```
-    pub fn with_same_site(mut self, same_site: SameSite) -> Self {
+    pub const fn with_same_site(mut self, same_site: SameSite) -> Self {
         self.session_config.same_site = same_site;
         self
     }
@@ -348,7 +345,7 @@ impl<C: CookieController> SessionManagerLayer<C> {
     /// let session_expiry = Expiry::OnInactivity(Duration::hours(1));
     /// let session_service = SessionManagerLayer::new(session_store).with_expiry(session_expiry);
     /// ```
-    pub fn with_expiry(mut self, expiry: Expiry) -> Self {
+    pub const fn with_expiry(mut self, expiry: Expiry) -> Self {
         self.session_config.expiry = expiry;
         self
     }
@@ -364,7 +361,7 @@ impl<C: CookieController> SessionManagerLayer<C> {
     /// let session_store = MemoryStore::default();
     /// let session_service = SessionManagerLayer::new(session_store).with_secure(true);
     /// ```
-    pub fn with_secure(mut self, secure: bool) -> Self {
+    pub const fn with_secure(mut self, secure: bool) -> Self {
         self.session_config.secure = secure;
         self
     }
@@ -400,7 +397,10 @@ impl<C: CookieController> SessionManagerLayer<C> {
         self.session_config.domain = Some(domain.into());
         self
     }
+}
 
+#[cfg(feature = "signed_cookies")]
+impl SessionManagerLayer<SignedCookie> {
     /// Manages the session cookie via a signed interface.
     ///
     /// See [`SignedCookies`](tower_cookies::SignedCookies).
@@ -418,57 +418,37 @@ impl<C: CookieController> SessionManagerLayer<C> {
     /// let session_store = MemoryStore::default();
     /// let session_service = SessionManagerLayer::new(session_store).with_signed(key);
     /// ```
-    #[cfg(feature = "signed")]
-    pub fn with_signed(self, key: Key) -> SessionManagerLayer<Store, SignedCookie> {
-        SessionManagerLayer::<Store, SignedCookie> {
-            session_store: self.session_store,
-            session_config: self.session_config,
+    pub fn new_signed(
+        session_store: SessionStore,
+        session_config: SessionConfig<'static>,
+        key: Key,
+    ) -> Self {
+        Self {
+            session_store: Arc::new(session_store),
+            session_config,
             cookie_controller: SignedCookie { key },
         }
     }
+}
 
-    /// Manages the session cookie via an encrypted interface.
-    ///
-    /// See [`PrivateCookies`](tower_cookies::PrivateCookies).
-    ///
-    /// ```rust
-    /// use tower_sessions::{cookie::Key, MemoryStore, SessionManagerLayer};
-    ///
-    /// # /*
-    /// let key = { /* a cryptographically random key >= 64 bytes */ };
-    /// # */
-    /// # let key: &Vec<u8> = &(0..64).collect();
-    /// # let key: &[u8] = &key[..];
-    /// # let key = Key::try_from(key).unwrap();
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_private(key);
-    /// ```
-    #[cfg(feature = "private")]
-    pub fn with_private(self, key: Key) -> SessionManagerLayer<Store, PrivateCookie> {
-        SessionManagerLayer::<Store, PrivateCookie> {
-            session_store: self.session_store,
-            session_config: self.session_config,
+#[cfg(feature = "private")]
+impl SessionManagerLayer<C = PrivateCookie> {
+    pub fn new_private(
+        session_store: SessionStore,
+        session_config: SessionConfig<'static>,
+        key: Key,
+    ) -> SessionManagerLayer<PrivateCookie> {
+        SessionManagerLayer::<PrivateCookie> {
+            session_store: Arc::new(session_store),
+            session_config,
             cookie_controller: PrivateCookie { key },
         }
     }
 }
 
-impl SessionManagerLayer {
-    /// Create a new [`SessionManagerLayer`] with the provided session store
-    /// and default cookie configuration.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use tower_sessions::{MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store);
-    /// ```
-    pub fn new(session_store: SessionStore) -> Self {
-        let session_config = SessionConfig::default();
-
+#[cfg(not(feature = "signed_cookies"))]
+impl SessionManagerLayer<PlaintextCookie> {
+    pub fn new(session_store: SessionStore, session_config: SessionConfig<'static>) -> Self {
         Self {
             session_store: Arc::new(session_store),
             session_config,

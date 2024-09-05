@@ -1,13 +1,18 @@
+use axum::http::StatusCode;
 use deadpool_redis::Pool as RedisPool;
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 
-use std::{fmt::Debug, sync::Arc};
+use std::{
+    fmt::{Debug, Display},
+    sync::Arc,
+};
 use tokio::sync::Mutex;
 
 use crate::{
     auth::AuthUser,
+    error::PhsError,
     sessions::{
         session::{Id, SessionData},
         Expiry,
@@ -29,7 +34,7 @@ pub enum SessionStoreError {
 }
 
 /// A Redis session store.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SessionStore {
     client: RedisPool,
     csprng: Arc<Mutex<ChaCha20Rng>>,
@@ -40,13 +45,16 @@ enum ExistenceFlag {
     XX,
 }
 
-impl ToString for ExistenceFlag {
-    fn to_string(&self) -> String {
-        match self {
-            Self::NX => "NX",
-            Self::XX => "XX",
-        }
-        .into()
+impl Display for ExistenceFlag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::NX => "NX",
+                Self::XX => "XX",
+            }
+        )
     }
 }
 
@@ -113,8 +121,11 @@ impl SessionStore {
         let query = redis::cmd("JSON.GET")
             .arg(key)
             .arg("$")
-            .query_async::<String>(&mut conn)
-            .await?;
+            .query_async::<Option<String>>(&mut conn)
+            .await?
+            .ok_or(SessionStoreError::Misc(String::from(
+                "Nil returned from Redis, user session not found",
+            )))?;
 
         let returned_values = serde_json::from_str::<Vec<SessionStoreData>>(&query)?;
 
@@ -124,11 +135,7 @@ impl SessionStore {
             ));
         }
 
-        let data = returned_values.get(0).unwrap();
-
-        tracing::debug!(?data, "Redis return string [0]");
-
-        // let data = serde_json::from_str::<SessionStoreData>(session_data)?;
+        let data = returned_values.first().unwrap();
 
         Ok(Some(SessionData::new(
             *session_id,
@@ -153,11 +160,11 @@ impl SessionStore {
     async fn new_id(&self) -> Result<Id, SessionStoreError> {
         let mut slice = [0_u8; 16];
         self.csprng.lock().await.try_fill_bytes(&mut slice)?;
-        Ok(Id(i128::from_le_bytes(slice)))
+        Ok(Id::new(i128::from_le_bytes(slice)))
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 struct SessionStoreData {
     #[serde(flatten)]
     data: AuthUser,

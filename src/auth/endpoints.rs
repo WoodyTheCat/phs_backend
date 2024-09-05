@@ -2,6 +2,7 @@ use super::Session;
 use argon2::{password_hash, Argon2, PasswordHash, PasswordVerifier};
 use axum::{
     extract::Query,
+    http::StatusCode,
     routing::{get, post, put},
     Extension, Json, Router,
 };
@@ -58,8 +59,10 @@ async fn login(
             &PasswordHash::new(user.hash.as_str())?,
         )
         .map_err(|e| match e {
-            password_hash::Error::Password => PhsError::UNAUTHORIZED,
-            _ => PhsError::INTERNAL,
+            password_hash::Error::Password => {
+                PhsError(StatusCode::UNAUTHORIZED, Some(Box::new(e)), "Unauthorised")
+            }
+            e => e.into(),
         })?;
 
     // Credentials are correct as of here
@@ -68,7 +71,7 @@ async fn login(
     let group_data = sqlx::query_as!(
         Group,
         r#"
-        SELECT id, group_name, permissions as "permissions: _"
+        SELECT id, name, permissions as "permissions: _"
         FROM users_groups
         INNER JOIN groups
         ON groups.id = users_groups.group_id
@@ -88,12 +91,13 @@ async fn login(
     // Add the user's override permissions to the vector
     permissions.extend(&user.permissions);
 
-    let groups = group_data.into_iter().map(|gd| gd.group_name).collect();
+    let groups = group_data.into_iter().map(|gd| gd.name).collect();
 
     let auth_user = AuthUser {
         id: user.id,
         hash: user.hash.clone(),
         username: user.username.clone(),
+        role: user.role,
         permissions,
         groups,
     };
@@ -103,7 +107,11 @@ async fn login(
     // Explicitly save the session so the ID is populated
     session.save().await?;
 
-    let hashed_id = session.get_hashed_id().await.ok_or(PhsError::INTERNAL)?;
+    let hashed_id = session.get_hashed_id().await.ok_or(PhsError(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        None,
+        "Error getting hashed session ID",
+    ))?;
 
     tracing::info!({ user = ?user.id, hashed_id }, "Successful login");
 
@@ -137,13 +145,13 @@ async fn get_groups(
     let groups = sqlx::query_as!(
         Group,
         r#"
-        SELECT id, group_name, permissions as "permissions: Vec<Permission>"
+        SELECT id, name, permissions as "permissions: Vec<Permission>"
         FROM groups
         LIMIT LEAST(100, $1)
         OFFSET $2
         "#,
         pagination.page_size,
-        (pagination.page * pagination.page_size) as i64
+        i64::from(pagination.page * pagination.page_size)
     )
     .fetch_all(&pool)
     .await?;
@@ -167,9 +175,9 @@ async fn create_group(
     let group = sqlx::query_as!(
         Group,
         r#"
-        insert into groups(group_name, permissions)
+        insert into groups(name, permissions)
         values ($1, $2)
-        returning id, group_name, permissions as "permissions: _"
+        returning id, name, permissions as "permissions: _"
         "#,
         body.group_name,
         body.permissions as Vec<Permission>
@@ -198,9 +206,9 @@ async fn put_group(
         Group,
         r#"
         update groups
-        set group_name = $1, permissions = $2
+        set name = $1, permissions = $2
         where id = $3
-        returning id, group_name, permissions as "permissions: _"
+        returning id, name, permissions as "permissions: _"
         "#,
         body.group_name,
         body.permissions as Vec<Permission>,

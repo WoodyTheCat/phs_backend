@@ -6,7 +6,7 @@ mod post;
 mod user;
 
 pub use department::Department;
-pub use user::User;
+pub use user::{Role, User};
 
 pub fn router() -> Router {
     Router::new()

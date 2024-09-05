@@ -1,0 +1,3 @@
+enforced-import-renames = [
+    { path = "serde_json::Value", rename = "JsonValue" },
+]

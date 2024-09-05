@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, PgPool};
+use tracing::instrument;
 
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
@@ -26,11 +27,6 @@ pub fn router() -> Router {
         .route("/v1/categories", post(create_tag).get(get_tags))
 }
 
-#[derive(Deserialize)]
-struct CreateCategoryBody {
-    tag: String,
-}
-
 async fn get_tags(Extension(pool): Extension<PgPool>) -> Result<Json<Vec<Category>>, PhsError> {
     let tags = sqlx::query_as!(Category, "SELECT id, category FROM categories LIMIT 100")
         .fetch_all(&pool)
@@ -39,6 +35,7 @@ async fn get_tags(Extension(pool): Extension<PgPool>) -> Result<Json<Vec<Categor
     Ok(Json(tags))
 }
 
+#[instrument(skip(pool))]
 async fn get_tag(
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -59,6 +56,12 @@ async fn get_tag(
     Ok(Json(tag))
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateCategoryBody {
+    tag: String,
+}
+
+#[instrument(skip(pool, _auth_session))]
 async fn create_tag(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditCategories as i32 }>,
@@ -81,11 +84,12 @@ async fn create_tag(
     Ok(Json(tag))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct PutTagBody {
     new: String,
 }
 
+#[instrument(skip(pool, _auth_session))]
 async fn put_tag(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditCategories as i32 }>,
@@ -111,6 +115,7 @@ async fn put_tag(
     Ok(Json(tag))
 }
 
+#[instrument(skip(pool, _auth_session))]
 async fn delete_tag(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditCategories as i32 }>,

@@ -1,5 +1,9 @@
 use crate::error::PhsError;
-use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
+use axum::{
+    async_trait,
+    extract::FromRequestParts,
+    http::{request::Parts, StatusCode},
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{
     postgres::{PgHasArrayType, PgTypeInfo},
@@ -17,13 +21,11 @@ macro_rules! i32_to_enum {
             $($(#[$vmeta])* $vname $(= $val)?,)*
         }
 
-        impl std::convert::TryFrom<i32> for $name {
-            type Error = ();
-
-            fn try_from(v: i32) -> Result<Self, Self::Error> {
-                match v {
-                    $(x if x == $name::$vname as i32 => Ok($name::$vname),)*
-                    _ => Err(()),
+        impl From<i32> for $name {
+            fn from(i: i32) -> Self {
+                match i {
+                    $(i if i == Self::$vname as i32 => Self::$vname,)*
+                    _ => panic!("Conversion from i32 to Permission failed, but all inputs are hardcoded!"),
                 }
             }
         }
@@ -41,7 +43,7 @@ i32_to_enum!(
         EditPosts,
         ManageUsers,
         ManagePermissions,
-        CreatePages,
+        ManagePages,
     }
 );
 
@@ -58,23 +60,28 @@ impl<S, const PERMISSION: i32> FromRequestParts<S> for RequirePermission<PERMISS
     type Rejection = PhsError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let auth_session = parts
-            .extensions
-            .get::<AuthSession>()
-            .ok_or(PhsError::UNAUTHORIZED)?;
+        let auth_session = parts.extensions.get::<AuthSession>().ok_or(PhsError(
+            StatusCode::UNAUTHORIZED,
+            None,
+            "Could not find AuthSession in request extensions",
+        ))?;
 
         auth_session
             .data()
             .permissions
-            .contains(&PERMISSION.try_into().map_err(|_| PhsError::INTERNAL)?)
+            .contains(&PERMISSION.into())
             .then_some(Self)
-            .ok_or(PhsError::FORBIDDEN)
+            .ok_or(PhsError(
+                StatusCode::FORBIDDEN,
+                None,
+                "Inadequate permissions",
+            ))
     }
 }
 
 #[derive(Clone, FromRow, Serialize, Deserialize, Debug)]
 pub struct Group {
     pub id: i32,
-    pub group_name: String,
+    pub name: String, // ERROR used to be group_name
     pub permissions: Vec<Permission>,
 }

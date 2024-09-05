@@ -1,13 +1,11 @@
-use crate::sessions::{
-    CookieController, PlaintextCookie, Session, SessionManager, SessionManagerLayer,
-};
+use crate::sessions::{CookieController, Session, SessionManager, SessionManagerLayer};
 use axum::{
     extract::Request,
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use std::{
     error::Error,
-    fmt::Debug,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -15,20 +13,19 @@ use std::{
 use tower_cookies::CookieManager;
 use tower_layer::Layer;
 use tower_service::Service;
-use tracing::Instrument;
 
 use crate::error::PhsError;
 
 use super::AuthSession;
 
 /// A middleware that provides [`AuthSession`] as a request extension.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AuthManager<S> {
     inner: S,
 }
 
 impl<S> AuthManager<S> {
-    pub fn new(inner: S) -> Self {
+    pub const fn new(inner: S) -> Self {
         Self { inner }
     }
 }
@@ -49,7 +46,7 @@ where
     }
 
     fn call(&mut self, mut req: Request) -> Self::Future {
-        let span = tracing::info_span!("auth service");
+        //let span = tracing::info_span!("auth service");
 
         // let _backend = self.backend.clone();
 
@@ -63,8 +60,12 @@ where
         Box::pin(
             async move {
                 let Some(session) = req.extensions().get::<Session>().cloned() else {
-                    tracing::error!("`Session` not found in request extensions");
-                    return Ok(PhsError::INTERNAL.into_response());
+                    return Ok(PhsError(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        None,
+                        "Session not found in request extensions",
+                    )
+                    .into_response());
                 };
 
                 match AuthSession::from_session(session).await {
@@ -79,19 +80,19 @@ where
                 }
 
                 inner.call(req).await
-            }
-            .instrument(span),
+            }, // TODO Span here without wrapping all errors
+               //.instrument(span),
         )
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct AuthManagerLayer<C: CookieController = PlaintextCookie> {
+#[derive(Clone)]
+pub struct AuthManagerLayer<C: CookieController> {
     session_manager_layer: SessionManagerLayer<C>,
 }
 
 impl<C: CookieController> AuthManagerLayer<C> {
-    pub(crate) fn new(session_manager_layer: SessionManagerLayer<C>) -> Self {
+    pub(crate) const fn new(session_manager_layer: SessionManagerLayer<C>) -> Self {
         Self {
             session_manager_layer,
         }

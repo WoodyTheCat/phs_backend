@@ -6,6 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::{prelude::FromRow, PgPool};
 use time::OffsetDateTime;
+use tracing::instrument;
 
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
@@ -37,19 +38,20 @@ pub struct Post {
     category: Option<i32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct PostSelectOptions {
     category: Option<i32>,
     department: Option<i32>,
     author: Option<i32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct PaginationOptions {
     page: i32,
     page_size: i32,
 }
 
+#[instrument(skip(pool))]
 async fn get_posts(
     Extension(pool): Extension<PgPool>,
     select_options: Query<PostSelectOptions>,
@@ -79,7 +81,7 @@ async fn get_posts(
         select_options.category,
         select_options.department,
         pagination.page_size,
-        (pagination.page * pagination.page_size) as i64
+        i64::from(pagination.page * pagination.page_size)
     )
     .fetch_all(&pool)
     .await?;
@@ -87,6 +89,7 @@ async fn get_posts(
     Ok(Json(posts))
 }
 
+#[instrument(skip(pool))]
 async fn get_post(
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -113,7 +116,7 @@ async fn get_post(
     Ok(Json(post))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct NewPostBody {
     title: String,
     content: String,
@@ -122,6 +125,7 @@ struct NewPostBody {
     category: Option<i32>,
 }
 
+#[instrument(skip(pool, auth_session))]
 async fn new_post(
     auth_session: AuthSession,
     _: RequirePermission<{ Permission::CreatePosts as i32 }>,
@@ -165,6 +169,7 @@ async fn new_post(
     Ok(Json(post))
 }
 
+#[instrument(skip(pool, _auth_session))]
 async fn delete_post(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditPosts as i32 }>,
@@ -179,7 +184,7 @@ async fn delete_post(
     Ok(())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct PostPatchBody {
     title: String,
     content: String,
@@ -189,6 +194,7 @@ struct PostPatchBody {
     category: Option<i32>,
 }
 
+#[instrument(skip(pool, _auth_session))]
 async fn put_post(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::EditPosts as i32 }>,

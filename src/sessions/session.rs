@@ -1,5 +1,5 @@
 use std::{
-    fmt::{self, Display},
+    fmt::{self, Debug, Display},
     hash::Hash,
     str::{self, FromStr},
     sync::Arc,
@@ -17,22 +17,13 @@ use super::{Error, Result, SessionStore};
 
 const DEFAULT_DURATION: Duration = Duration::weeks(2);
 
-/// A session which allows HTTP applications to associate key-value pairs with
-/// visitors.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Session {
     store: Arc<SessionStore>,
-
-    // This will be `None` when:
-    //
-    // 1. We have not been provided a session cookie or have failed to parse it,
-    // 2. The store has not found the session.
-    //
-    // Sync lock, see: https://docs.rs/tokio/latest/tokio/sync/struct.Mutex.html#which-kind-of-mutex-should-you-use
     session_data: Arc<Mutex<SessionData>>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 #[non_exhaustive]
 pub enum IdType {
     #[default]
@@ -41,7 +32,21 @@ pub enum IdType {
     Id(Id),
 }
 
-#[derive(Debug, Clone)]
+impl Debug for IdType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::None => "None",
+                Self::Unloaded(_) => "Unloaded([redacted])",
+                Self::Id(_) => "Id([redacted])",
+            }
+        )
+    }
+}
+
+#[derive(Clone)]
 pub struct SessionData {
     id: IdType,
     data: Option<AuthUser>,
@@ -50,25 +55,17 @@ pub struct SessionData {
 }
 
 impl SessionData {
-    pub fn id(&self) -> &IdType {
-        &self.id
-    }
-
-    pub fn expiry_date(&self) -> OffsetDateTime {
-        self.expiry.expiry_date()
-    }
-
     pub fn data(&self) -> Option<AuthUser> {
         self.data.clone()
     }
 
-    pub fn expiry(&self) -> Expiry {
+    pub const fn expiry(&self) -> Expiry {
         self.expiry
     }
 }
 
 impl SessionData {
-    pub fn new(id: Id, data: Option<AuthUser>, expiry: Expiry) -> Self {
+    pub const fn new(id: Id, data: Option<AuthUser>, expiry: Expiry) -> Self {
         Self {
             id: IdType::Unloaded(id),
             data,
@@ -81,15 +78,12 @@ impl SessionData {
 impl Session {
     /// Creates a new session with the session ID, store, and expiry.
     ///
-    /// This method is lazy and does not invoke the overhead of talking to the
+    /// WARN: THIS METHOD IS LAZY and does not invoke the overhead of talking to the
     /// backing store.
     pub fn new(session_id: Option<Id>, store: Arc<SessionStore>, expiry: Expiry) -> Self {
         Self {
             session_data: Arc::new(Mutex::new(SessionData {
-                id: match session_id {
-                    Some(id) => IdType::Unloaded(id),
-                    None => IdType::None,
-                },
+                id: session_id.map_or(IdType::None, IdType::Unloaded), // ERROR: here?
                 data: None,
                 expiry,
                 should_save: false,
@@ -118,23 +112,21 @@ impl Session {
 
         tracing::trace!("Record not loaded from store, loading...");
 
-        *session_data = match self.store.load(&id).await? {
-            Some(loaded_record) => loaded_record,
-            None => {
-                // Reaching this point indicates that the browser sent an expired cookie,
-                // it expired whilst in transit, or possible suspicious activity
-                tracing::warn!(
-                    ?id,
-                    "Expired cookie received, did the store go down? Possible suspicious actvity"
+        *session_data = if let Some(loaded_record) = self.store.load(&id).await? {
+            loaded_record
+        } else {
+            // Reaching this point indicates that the browser sent an expired cookie,
+            // it expired whilst in transit, or possible suspicious activity
+            tracing::warn!(
+                    "No session found. Was an expired cookie received, or is the store offline? Possible suspicious actvity"
                 );
-                let new_id = self.store.create(session_data).await?;
+            let new_id = self.store.create(session_data).await?;
 
-                SessionData {
-                    id: IdType::Id(new_id),
-                    data: None,
-                    expiry: session_data.expiry,
-                    should_save: false,
-                }
+            SessionData {
+                id: IdType::Id(new_id),
+                data: None,
+                expiry: session_data.expiry,
+                should_save: false,
             }
         };
 
@@ -307,18 +299,12 @@ impl Session {
     pub async fn delete(&self) -> Result<()> {
         let id = self.id().await;
 
-        if !matches!(id, IdType::Id(_) | IdType::Unloaded(_)) {
+        let (IdType::Unloaded(session_id) | IdType::Id(session_id)) = id else {
             tracing::error!({ ?id } , "Called `Session::delete` with an IdType other than Id");
             return Ok(());
         };
 
         tracing::trace!("Deleting session");
-
-        let session_id = match id {
-            IdType::Unloaded(id) => id,
-            IdType::Id(id) => id,
-            _ => unreachable!(),
-        };
 
         self.store.delete(&session_id).await.map_err(Error::Store)?;
 
@@ -371,13 +357,16 @@ impl Session {
 }
 
 /// ID type for sessions. Session stores should implement generating new session IDs securely
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, Eq, Hash, PartialEq)]
-pub struct Id(pub i128); // TODO: By this being public, it may be possible to override the
-                         // session ID, which is undesirable.
+#[derive(Copy, Clone, Deserialize, Serialize, Eq, Hash, PartialEq)]
+pub struct Id(i128);
 
 impl Id {
     pub fn hashed_id(&self) -> String {
         hex::encode(Sha256::digest(self.to_string()))
+    }
+
+    pub const fn new(id: i128) -> Self {
+        Self(id)
     }
 }
 
@@ -435,12 +424,9 @@ impl Expiry {
     /// Get session expiry as `OffsetDateTime`.
     pub fn expiry_date(&self) -> OffsetDateTime {
         match self {
-            Expiry::OnInactivity(duration) => OffsetDateTime::now_utc().saturating_add(*duration),
-            Expiry::AtDateTime(datetime) => *datetime,
-            Expiry::OnSessionEnd => {
-                // TODO: The default should probably be configurable.
-                OffsetDateTime::now_utc().saturating_add(DEFAULT_DURATION)
-            }
+            Self::OnInactivity(duration) => OffsetDateTime::now_utc().saturating_add(*duration),
+            Self::AtDateTime(datetime) => *datetime,
+            Self::OnSessionEnd => OffsetDateTime::now_utc().saturating_add(DEFAULT_DURATION),
         }
     }
 }

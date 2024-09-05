@@ -3,15 +3,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub use self::{
-    service::{CookieController, PlaintextCookie, SessionManager, SessionManagerLayer},
-    session::{Expiry, Id, IdType, Session, SessionData},
+    service::{CookieController, SessionConfig, SessionManager, SessionManagerLayer},
+    session::{Expiry, IdType, Session},
     store::{SessionStore, SessionStoreError},
 };
 
 mod extract;
 mod service;
 mod session;
-mod session_store;
 mod store;
 
 /// Session errors.
