@@ -13,6 +13,7 @@ use crate::{
     auth::{AuthUser, Permission},
     error::PhsError,
     resources::User,
+    PaginationOptions,
 };
 
 use super::{AuthSession, Group, RequirePermission};
@@ -129,15 +130,9 @@ async fn logout(mut auth_session: AuthSession) -> Result<(), PhsError> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct PaginationOptions {
-    pub page: i32,
-    pub page_size: i32,
-}
-
 async fn get_groups(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManagePermissions as i32 }>,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     pagination: Query<PaginationOptions>,
     Extension(pool): Extension<PgPool>,
@@ -167,7 +162,7 @@ pub struct CreateGroupBody {
 
 async fn create_group(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManagePermissions as i32 }>,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Json(body): Json<CreateGroupBody>,
@@ -196,7 +191,7 @@ pub struct PutGroupBody {
 
 async fn put_group(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManagePermissions as i32 }>,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Query(id): Query<i32>,
@@ -222,7 +217,7 @@ async fn put_group(
 
 async fn delete_group(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManagePermissions as i32 }>,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Query(id): Query<i32>,
@@ -242,8 +237,7 @@ struct ManageGroupParams {
 
 async fn add_to_group(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManagePermissions as i32 }>,
-    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     params: Query<ManageGroupParams>,
     Extension(pool): Extension<PgPool>,
@@ -261,8 +255,7 @@ async fn add_to_group(
 
 async fn delete_from_group(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManagePermissions as i32 }>,
-    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     params: Query<ManageGroupParams>,
     Extension(pool): Extension<PgPool>,

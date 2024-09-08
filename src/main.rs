@@ -8,11 +8,13 @@
 )]
 #![allow(clippy::module_name_repetitions)]
 
-use std::error::Error;
+use std::{error::Error, sync::Arc};
 
 use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
 
 use sqlx::{postgres::PgPoolOptions, Postgres};
+use tera::Tera;
+use tokio::sync::Mutex;
 //use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 type DbPool = sqlx::Pool<Postgres>;
@@ -67,11 +69,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let redis_pool = init_redis()?;
 
     // Create a folder for the dynamic page data
-    if !tokio::fs::try_exists("./_pages").await? {
-        tokio::fs::create_dir("./_pages").await?;
+    if !tokio::fs::try_exists("pages").await? {
+        tokio::fs::create_dir("pages").await?;
     }
 
-    phs_backend::serve(db, redis_pool).await?;
+    let tera = Arc::new(Mutex::new(Tera::new("pages/templates/**/*")?));
+
+    phs_backend::serve(db, redis_pool, tera).await?;
 
     Ok(())
 }

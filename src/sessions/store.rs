@@ -1,4 +1,3 @@
-use axum::http::StatusCode;
 use deadpool_redis::Pool as RedisPool;
 use rand_chacha::ChaCha20Rng;
 use rand_core::{RngCore, SeedableRng};
@@ -12,7 +11,6 @@ use tokio::sync::Mutex;
 
 use crate::{
     auth::AuthUser,
-    error::PhsError,
     sessions::{
         session::{Id, SessionData},
         Expiry,

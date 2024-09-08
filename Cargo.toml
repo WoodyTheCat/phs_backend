@@ -69,5 +69,7 @@ fast_image_resize = "4.2.1"
 sanitise-file-name = "1.0.0"
 futures-util = "0.3.30"
 console-subscriber = "0.4.0"
+tera = "1.20.0"
+slugify = "0.1.0"
 
 

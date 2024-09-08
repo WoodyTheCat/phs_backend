@@ -77,7 +77,7 @@ struct CreateUserRequest {
 #[instrument(skip(pool, _auth_session))]
 async fn create_user(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+    _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Json(req): Json<CreateUserRequest>,
@@ -190,7 +190,7 @@ async fn get_user(
 #[instrument(skip(pool, _auth_session))]
 async fn get_users(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+    _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<Vec<UserNoHash>>, PhsError> {
@@ -225,7 +225,7 @@ struct PutUserBody {
 #[instrument(skip(pool, _auth_session))]
 async fn put_user(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+    _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
     Query(id): Query<i32>,
     Extension(pool): Extension<PgPool>,
@@ -361,7 +361,7 @@ struct PostResetPasswordBody {
 #[instrument(skip_all)]
 async fn reset_password(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+    _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Extension(redis_pool): Extension<RedisPool>,
@@ -408,7 +408,7 @@ async fn reset_password(
 #[instrument(skip(pool, _auth_session))]
 async fn delete_user(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::ManageUsers as i32 }>,
+    _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
     Query(id): Query<i32>,
     Extension(pool): Extension<PgPool>,

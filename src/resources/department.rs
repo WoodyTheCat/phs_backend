@@ -70,7 +70,7 @@ struct CreateDepartmentBody {
 #[instrument(skip(pool, _auth_session))]
 async fn create_department(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditDepartments as i32 }>,
+    _: RequirePermission<{ Permission::EditDepartments as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Json(req): Json<CreateDepartmentBody>,
@@ -98,7 +98,7 @@ struct PutDepartmentBody {
 #[instrument(skip(pool, _auth_session))]
 async fn put_department(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditDepartments as i32 }>,
+    _: RequirePermission<{ Permission::EditDepartments as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -124,7 +124,7 @@ async fn put_department(
 #[instrument(skip(pool, _auth_session))]
 async fn delete_department(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditDepartments as i32 }>,
+    _: RequirePermission<{ Permission::EditDepartments as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,

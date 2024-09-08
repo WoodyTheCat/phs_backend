@@ -13,22 +13,28 @@ use auth::AuthManagerLayer;
 use axum::{Extension, Router};
 use axum_server::tls_rustls::RustlsConfig;
 use deadpool_redis::Pool as RedisPool;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use std::{error::Error, net::SocketAddr, path::PathBuf};
+use std::{error::Error, net::SocketAddr, path::PathBuf, sync::Arc};
+use tera::Tera;
 use time::Duration;
+use tokio::sync::Mutex;
 use tower_cookies::Key;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
 use sessions::{Expiry, SessionConfig, SessionManagerLayer, SessionStore};
 
+#[macro_use]
+extern crate slugify;
+
 mod auth;
 mod error;
 mod resources;
-//mod serve;
+mod serve;
 mod sessions;
 
 #[allow(clippy::missing_panics_doc)]
-pub fn app(db: PgPool, redis_pool: RedisPool) -> Router {
+pub fn app(db: PgPool, redis_pool: RedisPool, tera: Arc<Mutex<Tera>>) -> Router {
     let session_store = SessionStore::new(redis_pool.clone());
     #[cfg(feature = "signed_cookies")]
     let session_manager_layer = SessionManagerLayer::new_signed(
@@ -50,17 +56,23 @@ pub fn app(db: PgPool, redis_pool: RedisPool) -> Router {
         // Routers
         .merge(resources::router())
         .merge(auth::router())
-        .route_service("/*page", ServeDir::new("./_pages/"))
+        .merge(serve::router())
+        .route_service("/*page", ServeDir::new("pages/dist/"))
         // Layers
         .layer(Extension(db))
         .layer(Extension(redis_pool))
+        .layer(Extension(tera))
         .layer(auth_layer)
         .layer(CorsLayer::permissive()) // TODO WARN: Restrict for prod build
 }
 
 #[allow(clippy::missing_panics_doc)]
-pub async fn serve(db: PgPool, redis: RedisPool) -> Result<(), Box<dyn Error>> {
-    let app = app(db, redis).into_make_service();
+pub async fn serve(
+    db: PgPool,
+    redis_pool: RedisPool,
+    tera: Arc<Mutex<Tera>>,
+) -> Result<(), Box<dyn Error>> {
+    let app = app(db, redis_pool, tera).into_make_service();
 
     #[cfg(feature = "ssl")]
     {
@@ -98,3 +110,11 @@ pub async fn serve(db: PgPool, redis: RedisPool) -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PaginationOptions {
+    pub page: i32,
+    pub page_size: i32,
+}
+
+pub type TeraState = Arc<Mutex<Tera>>;

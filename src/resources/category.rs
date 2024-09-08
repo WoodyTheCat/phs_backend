@@ -64,7 +64,7 @@ struct CreateCategoryBody {
 #[instrument(skip(pool, _auth_session))]
 async fn create_tag(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditCategories as i32 }>,
+    _: RequirePermission<{ Permission::EditCategories as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Json(req): Json<CreateCategoryBody>,
@@ -92,7 +92,7 @@ struct PutTagBody {
 #[instrument(skip(pool, _auth_session))]
 async fn put_tag(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditCategories as i32 }>,
+    _: RequirePermission<{ Permission::EditCategories as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -118,7 +118,7 @@ async fn put_tag(
 #[instrument(skip(pool, _auth_session))]
 async fn delete_tag(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditCategories as i32 }>,
+    _: RequirePermission<{ Permission::EditCategories as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,

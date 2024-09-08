@@ -21,10 +21,10 @@ macro_rules! i32_to_enum {
             $($(#[$vmeta])* $vname $(= $val)?,)*
         }
 
-        impl From<i32> for $name {
-            fn from(i: i32) -> Self {
+        impl From<u8> for $name {
+            fn from(i: u8) -> Self {
                 match i {
-                    $(i if i == Self::$vname as i32 => Self::$vname,)*
+                    $(i if i == Self::$vname as u8 => Self::$vname,)*
                     _ => panic!("Conversion from i32 to Permission failed, but all inputs are hardcoded!"),
                 }
             }
@@ -53,10 +53,10 @@ impl PgHasArrayType for Permission {
     }
 }
 
-pub struct RequirePermission<const PERMISSION: i32>;
+pub struct RequirePermission<const PERMISSION: u8>;
 
 #[async_trait]
-impl<S, const PERMISSION: i32> FromRequestParts<S> for RequirePermission<PERMISSION> {
+impl<S, const PERMISSION: u8> FromRequestParts<S> for RequirePermission<PERMISSION> {
     type Rejection = PhsError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {

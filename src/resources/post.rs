@@ -11,6 +11,7 @@ use tracing::instrument;
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
     error::PhsError,
+    PaginationOptions,
 };
 
 pub fn router() -> Router {
@@ -43,12 +44,6 @@ struct PostSelectOptions {
     category: Option<i32>,
     department: Option<i32>,
     author: Option<i32>,
-}
-
-#[derive(Deserialize, Debug)]
-struct PaginationOptions {
-    page: i32,
-    page_size: i32,
 }
 
 #[instrument(skip(pool))]
@@ -128,7 +123,7 @@ struct NewPostBody {
 #[instrument(skip(pool, auth_session))]
 async fn new_post(
     auth_session: AuthSession,
-    _: RequirePermission<{ Permission::CreatePosts as i32 }>,
+    _: RequirePermission<{ Permission::CreatePosts as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Json(body): Json<NewPostBody>,
@@ -172,7 +167,7 @@ async fn new_post(
 #[instrument(skip(pool, _auth_session))]
 async fn delete_post(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditPosts as i32 }>,
+    _: RequirePermission<{ Permission::EditPosts as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
@@ -197,7 +192,7 @@ struct PostPatchBody {
 #[instrument(skip(pool, _auth_session))]
 async fn put_post(
     _auth_session: AuthSession,
-    _: RequirePermission<{ Permission::EditPosts as i32 }>,
+    _: RequirePermission<{ Permission::EditPosts as u8 }>,
 
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
