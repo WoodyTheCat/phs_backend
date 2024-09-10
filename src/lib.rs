@@ -24,7 +24,6 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 
 use sessions::{Expiry, SessionConfig, SessionManagerLayer, SessionStore};
 
-#[macro_use]
 extern crate slugify;
 
 mod auth;
