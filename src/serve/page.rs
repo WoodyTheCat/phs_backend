@@ -34,7 +34,7 @@ pub fn router() -> Router {
 
 #[derive(Deserialize, Debug)]
 struct PostNewPage {
-    name: String,
+    unsafe_name: String,
     data: DynamicPageData,
 }
 
@@ -46,7 +46,7 @@ async fn post_new_dynamic_page(
     Extension(pool): Extension<PgPool>,
     Json(body): Json<PostNewPage>,
 ) -> Result<(), PhsError> {
-    let name = slugify::slugify!(&body.name, separator = "_");
+    let name = slugify::slugify!(&body.unsafe_name, separator = "_");
 
     sqlx::query!(
         "INSERT INTO pages (name, modified) VALUES ($1, 'new'::page_status)",
@@ -55,7 +55,21 @@ async fn post_new_dynamic_page(
     .execute(&pool)
     .await?;
 
-    let mut writer = BufWriter::new(File::create_new(format!("pages/specs/{name}.json")).await?);
+    let spec_path = {
+        let mut p = PathBuf::from("pages/specs");
+        p.push(&name);
+        p.set_extension(".json");
+        p
+    };
+
+    let temp_path = {
+        let mut p = spec_path.clone();
+        p.set_extension(".json.temp");
+        p
+    };
+
+    // Tempfile for psuedo-atomic writes
+    let mut writer = BufWriter::new(File::create_new(&temp_path).await?);
 
     writer
         .write_all(serde_json::ser::to_string(&body.data)?.as_bytes())
@@ -65,15 +79,21 @@ async fn post_new_dynamic_page(
 
     drop(writer);
 
-    Renderer::render_fragment(
-        PathBuf::from(format!("pages/fragments/{name}.html")),
-        body.data,
-    )
-    .await?;
+    tokio::fs::rename(temp_path, spec_path).await?;
+
+    let fragment_path = {
+        let mut p = PathBuf::from("pages/fragments");
+        p.push(&name);
+        p.set_extension("html");
+        p
+    };
+
+    Renderer::render_fragment(fragment_path, body.data).await?;
 
     Ok(())
 }
 
+// FIXME: Past me, please don't use format! so much... Also in the other endpoints in this file
 #[instrument(skip(pool, _auth_session))]
 async fn put_dynamic_page(
     _auth_session: AuthSession,
@@ -83,8 +103,6 @@ async fn put_dynamic_page(
     Path(id): Path<i32>,
     Json(data): Json<DynamicPageData>,
 ) -> Result<(), PhsError> {
-    // TODO Slugify name
-
     let name = sqlx::query_scalar!(
         "UPDATE pages SET modified = 'edited'::page_status WHERE id = $1 RETURNING name",
         id
@@ -92,13 +110,26 @@ async fn put_dynamic_page(
     .fetch_one(&pool)
     .await?;
 
-    let mut writer = BufWriter::new(
-        File::options()
-            .read(true)
-            .write(true)
-            .open(format!("pages/specs/{name}.json"))
-            .await?,
-    );
+    let spec_path = {
+        let mut p = PathBuf::from("pages/specs");
+        p.push(&name);
+        p.set_extension(".json");
+        p
+    };
+    let temp_path = {
+        let mut p = spec_path.clone();
+        p.set_extension(".json.temp");
+        p
+    };
+    let fragment_path = {
+        let mut p = PathBuf::from("pages/fragments");
+        p.push(&name);
+        p.set_extension("html");
+        p
+    };
+
+    // Tempfile for psuedo-atomic writes
+    let mut writer = BufWriter::new(File::options().write(true).open(&temp_path).await?);
 
     writer
         .write_all(serde_json::ser::to_string(&data)?.as_bytes())
@@ -108,7 +139,9 @@ async fn put_dynamic_page(
 
     drop(writer);
 
-    Renderer::render_fragment(PathBuf::from(format!("pages/fragments/{name}.html")), data).await?;
+    tokio::fs::rename(temp_path, spec_path).await?;
+
+    Renderer::render_fragment(PathBuf::from(fragment_path), data).await?;
 
     Ok(())
 }
@@ -149,7 +182,6 @@ async fn post_deploy_dynamic_pages(
     Json(body): Json<Vec<i32>>,
 ) -> Result<(), PhsError> {
     let pages = sqlx::query_scalar!(
-        //r#"SELECT name FROM pages WHERE id = ANY ($1) AND modified = ANY (ARRAY['new', 'edited']::page_status[])"#,
         r#"UPDATE pages SET modified = 'unmodified'::page_status WHERE id = ANY ($1) AND modified = ANY (ARRAY['new', 'edited']::page_status[]) RETURNING name"#,
         &body
     )
@@ -173,18 +205,41 @@ async fn deploy_page(slug: String, tera: &mut Tera) -> Result<(), PhsError> {
     let mut context = tera::Context::new();
     context.insert("title", &slug);
 
+    let fragment_path = {
+        let mut p = PathBuf::from("pages/fragments");
+        p.push(&slug);
+        p.set_extension("html");
+        p
+    };
+
     {
-        tokio::fs::File::open(format!("pages/fragments/{slug}.html"))
+        tokio::fs::File::open(fragment_path)
             .await?
             .read_to_string(&mut fragment)
             .await?;
     }
 
-    let mut dist = tokio::fs::File::create(format!("pages/dist/{slug}.html")).await?;
+    let dist_path = {
+        let mut p = PathBuf::from("pages/dist");
+        p.push(&slug);
+        p.set_extension(".html");
+        p
+    };
+
+    let dist_temp_path = {
+        let mut p = dist_path.clone();
+        p.set_extension(".html.temp");
+        p
+    };
+
+    // Tempfile for psuedo-atomic writes
+    let mut dist = tokio::fs::File::create(&dist_temp_path).await?;
 
     let str = tera.render_str(&fragment, &context).unwrap();
 
     dist.write_all(str.as_bytes()).await?;
+
+    tokio::fs::rename(dist_temp_path, dist_path).await?;
 
     Ok(())
 }

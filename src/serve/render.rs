@@ -83,7 +83,10 @@ impl Renderer {
         path: PathBuf,
         elements: Vec<DynamicPageElement>,
     ) -> Result<(), PhsError> {
-        let file = File::create(path).await?;
+        let mut temp_path = path.clone();
+        temp_path.set_extension(".html.temp");
+
+        let file = File::create(&temp_path).await?;
         let mut writer = BufWriter::new(file);
 
         writer.write_all(FRAGMENT_HEADER.as_bytes()).await?;
@@ -95,6 +98,8 @@ impl Renderer {
         writer.write_all(FRAGMENT_FOOTER.as_bytes()).await?;
 
         writer.flush().await?;
+
+        tokio::fs::rename(temp_path, path).await?;
 
         Ok(())
     }
