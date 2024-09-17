@@ -35,7 +35,7 @@ hex = "0.4.3"
 base64 = "0.22.1"
 
 # Stores
-sqlx = { version = "0.7.4", features = [
+sqlx = { version = "0.8.1", features = [
     "postgres",
     "runtime-tokio-rustls",
     "time",

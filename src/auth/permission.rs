@@ -47,12 +47,6 @@ i32_to_enum!(
     }
 );
 
-impl PgHasArrayType for Permission {
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-        PgTypeInfo::with_name("_permission")
-    }
-}
-
 pub struct RequirePermission<const PERMISSION: u8>;
 
 #[async_trait]
