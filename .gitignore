@@ -1,3 +1,5 @@
 /target
-/_pages
+/pages/fragments/*.html
+/pages/dist/*.html
+/pages/specs/*.json
 Cargo.lock
