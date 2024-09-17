@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update groups\n        set name = $1, permissions = $2\n        where id = $3\n        returning id, name, permissions as \"permissions: _\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "permissions: _",
+        "type_info": {
+          "Custom": {
+            "name": "permission[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "permission",
+                  "kind": {
+                    "Enum": [
+                      "edit_departments",
+                      "edit_categories",
+                      "create_posts",
+                      "edit_posts",
+                      "manage_users",
+                      "manage_pages"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        {
+          "Custom": {
+            "name": "permission[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "permission",
+                  "kind": {
+                    "Enum": [
+                      "edit_departments",
+                      "edit_categories",
+                      "create_posts",
+                      "edit_posts",
+                      "manage_users",
+                      "manage_pages"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ef23d299d3a9894692760347db64ba287858d55ae390abb284dc49377cb76822"
+}

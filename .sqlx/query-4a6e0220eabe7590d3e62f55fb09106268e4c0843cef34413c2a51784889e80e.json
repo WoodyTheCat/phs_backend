@@ -1,0 +1,69 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO posts (\n                title,\n                content,\n                author,\n                pinned,\n                department,\n                category\n            ) VALUES (\n                $1, $2, $3, $4, $5, $6\n            ) RETURNING id,\n                title,\n                content,\n                pinned,\n                department,\n                category,\n                author,\n                date as \"date: _\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "pinned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "department",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "category",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "author",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "date: _",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Int4",
+        "Bool",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "4a6e0220eabe7590d3e62f55fb09106268e4c0843cef34413c2a51784889e80e"
+}
