@@ -1,3 +1,5 @@
+[![Cargo Build & Test](https://github.com/WoodyTheCat/phs_backend/actions/workflows/rust.yml/badge.svg)](https://github.com/WoodyTheCat/phs_backend/actions/workflows/rust.yml)
+
 # TODOS
 - SSL fallback
 - In-memory or Redis caching for dynamic pages
