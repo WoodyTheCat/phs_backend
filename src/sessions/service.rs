@@ -277,122 +277,36 @@ pub struct SessionManagerLayer<C: CookieController> {
 }
 
 impl<C: CookieController> SessionManagerLayer<C> {
-    /// Configures the name of the cookie used for the session.
-    /// The default value is `"id"`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use tower_sessions::{MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_name("my.sid");
-    /// ```
     pub fn with_name<N: Into<Cow<'static, str>>>(mut self, name: N) -> Self {
         self.session_config.name = name.into();
         self
     }
 
-    /// Configures the `"HttpOnly"` attribute of the cookie used for the
-    /// session.
-    ///
-    /// # ⚠️ **Warning: Cross-site scripting risk**
-    ///
-    /// Applications should generally **not** override the default value of
-    /// `true`. If you do, you are exposing your application to increased risk
-    /// of cookie theft via techniques like cross-site scripting.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use tower_sessions::{MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_http_only(true);
-    /// ```
     pub const fn with_http_only(mut self, http_only: bool) -> Self {
         self.session_config.http_only = http_only;
         self
     }
 
-    /// Configures the `"SameSite"` attribute of the cookie used for the
-    /// session.
-    /// The default value is [`SameSite::Strict`].
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use tower_sessions::{cookie::SameSite, MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_same_site(SameSite::Lax);
-    /// ```
     pub const fn with_same_site(mut self, same_site: SameSite) -> Self {
         self.session_config.same_site = same_site;
         self
     }
 
-    /// Configures the `"Max-Age"` attribute of the cookie used for the session.
-    /// The default value is `None`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use time::Duration;
-    /// use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_expiry = Expiry::OnInactivity(Duration::hours(1));
-    /// let session_service = SessionManagerLayer::new(session_store).with_expiry(session_expiry);
-    /// ```
     pub const fn with_expiry(mut self, expiry: Expiry) -> Self {
         self.session_config.expiry = expiry;
         self
     }
 
-    /// Configures the `"Secure"` attribute of the cookie used for the session.
-    /// The default value is `true`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use tower_sessions::{MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_secure(true);
-    /// ```
     pub const fn with_secure(mut self, secure: bool) -> Self {
         self.session_config.secure = secure;
         self
     }
 
-    /// Configures the `"Path"` attribute of the cookie used for the session.
-    /// The default value is `"/"`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use tower_sessions::{MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_path("/some/path");
-    /// ```
     pub fn with_path<P: Into<Cow<'static, str>>>(mut self, path: P) -> Self {
         self.session_config.path = path.into();
         self
     }
 
-    /// Configures the `"Domain"` attribute of the cookie used for the session.
-    /// The default value is `None`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use tower_sessions::{MemoryStore, SessionManagerLayer};
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_domain("localhost");
-    /// ```
     pub fn with_domain<D: Into<Cow<'static, str>>>(mut self, domain: D) -> Self {
         self.session_config.domain = Some(domain.into());
         self
@@ -402,22 +316,6 @@ impl<C: CookieController> SessionManagerLayer<C> {
 #[cfg(feature = "signed_cookies")]
 impl SessionManagerLayer<SignedCookie> {
     /// Manages the session cookie via a signed interface.
-    ///
-    /// See [`SignedCookies`](tower_cookies::SignedCookies).
-    ///
-    /// ```rust
-    /// use tower_sessions::{cookie::Key, MemoryStore, SessionManagerLayer};
-    ///
-    /// # /*
-    /// let key = { /* a cryptographically random key >= 64 bytes */ };
-    /// # */
-    /// # let key: &Vec<u8> = &(0..64).collect();
-    /// # let key: &[u8] = &key[..];
-    /// # let key = Key::try_from(key).unwrap();
-    ///
-    /// let session_store = MemoryStore::default();
-    /// let session_service = SessionManagerLayer::new(session_store).with_signed(key);
-    /// ```
     pub fn new_signed(
         session_store: SessionStore,
         session_config: SessionConfig<'static>,
