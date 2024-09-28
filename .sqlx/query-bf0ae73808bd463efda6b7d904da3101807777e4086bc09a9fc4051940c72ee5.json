@@ -65,6 +65,7 @@
                       "create_posts",
                       "edit_posts",
                       "manage_users",
+                      "manage_permissions",
                       "manage_pages"
                     ]
                   }

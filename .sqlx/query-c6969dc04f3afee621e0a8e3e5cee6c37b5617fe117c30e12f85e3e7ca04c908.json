@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, permissions as \"permissions: _\"\n        FROM users_groups\n        INNER JOIN groups\n        ON groups.id = users_groups.group_id\n        WHERE user_id = $1\n        ",
+  "query": "\n        SELECT id, group_name, permissions as \"permissions: Vec<Permission>\"\n        FROM groups\n        WHERE id > $1\n        ORDER BY id ASC\n        LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -10,12 +10,12 @@
       },
       {
         "ordinal": 1,
-        "name": "name",
+        "name": "group_name",
         "type_info": "Varchar"
       },
       {
         "ordinal": 2,
-        "name": "permissions: _",
+        "name": "permissions: Vec<Permission>",
         "type_info": {
           "Custom": {
             "name": "permission[]",
@@ -30,6 +30,7 @@
                       "create_posts",
                       "edit_posts",
                       "manage_users",
+                      "manage_permissions",
                       "manage_pages"
                     ]
                   }
@@ -42,7 +43,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int4"
+        "Int4",
+        "Int8"
       ]
     },
     "nullable": [
@@ -51,5 +53,5 @@
       false
     ]
   },
-  "hash": "b1dc9c4fb4fbcf39617e8efcbbdff605011d210e4f10de9e3fc323b78cab6537"
+  "hash": "c6969dc04f3afee621e0a8e3e5cee6c37b5617fe117c30e12f85e3e7ca04c908"
 }

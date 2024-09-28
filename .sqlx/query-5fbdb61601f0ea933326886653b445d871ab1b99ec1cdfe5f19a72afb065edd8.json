@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n            id, name, created_at, updated_at, modified as \"modified: _\"\n            FROM pages\n            ORDER BY name DESC\n            LIMIT LEAST($1, 100)\n            OFFSET $2\n        ",
+  "query": "\n            SELECT\n            id, name, created_at, updated_at, modified as \"modified: _\"\n            FROM pages\n            WHERE id > $1\n            ORDER BY name DESC\n            LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -54,5 +54,5 @@
       false
     ]
   },
-  "hash": "341cd3c1a713e36f0d4f1c42ff35cf7a44e7cad89115116729ee1d95f6576ca7"
+  "hash": "5fbdb61601f0ea933326886653b445d871ab1b99ec1cdfe5f19a72afb065edd8"
 }

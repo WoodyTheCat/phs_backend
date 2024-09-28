@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        update groups\n        set name = $1, permissions = $2\n        where id = $3\n        returning id, name, permissions as \"permissions: _\"\n        ",
+  "query": "\n        insert into groups(group_name, permissions)\n        values ($1, $2)\n        returning id, group_name, permissions as \"permissions: _\"\n        ",
   "describe": {
     "columns": [
       {
@@ -10,7 +10,7 @@
       },
       {
         "ordinal": 1,
-        "name": "name",
+        "name": "group_name",
         "type_info": "Varchar"
       },
       {
@@ -30,6 +30,7 @@
                       "create_posts",
                       "edit_posts",
                       "manage_users",
+                      "manage_permissions",
                       "manage_pages"
                     ]
                   }
@@ -57,6 +58,7 @@
                       "create_posts",
                       "edit_posts",
                       "manage_users",
+                      "manage_permissions",
                       "manage_pages"
                     ]
                   }
@@ -64,8 +66,7 @@
               }
             }
           }
-        },
-        "Int4"
+        }
       ]
     },
     "nullable": [
@@ -74,5 +75,5 @@
       false
     ]
   },
-  "hash": "ef23d299d3a9894692760347db64ba287858d55ae390abb284dc49377cb76822"
+  "hash": "1b0c29bb0b7a4c410e126a025625641c7c642a9b75eadf6967a22159e626ee2d"
 }

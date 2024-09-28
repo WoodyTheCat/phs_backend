@@ -16,7 +16,8 @@ create type permission as enum(
   'create_posts',
   'edit_posts',
   'manage_users',
-  'create_pages'
+  'manage_permissions',
+  'manage_pages'
 );
 
 create table users (
@@ -65,7 +66,7 @@ create table posts (
   content text not null,
 
   author integer,
-  date date not null default current_date,
+  date timestamptz not null default current_date,
 
   pinned boolean not null,
   department integer,
@@ -86,3 +87,16 @@ create table posts (
   on update cascade
   on delete set null
 );
+
+create type page_status as enum('unmodified', 'new', 'edited');
+
+create table if not exists pages (
+  id serial primary key,
+  name varchar(255) unique not null,
+
+  created_at timestamp not null default now(),
+  updated_at timestamp not null default now(),
+
+  modified page_status not null default 'new'::page_status
+);
+
