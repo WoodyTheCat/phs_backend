@@ -11,7 +11,10 @@
 
 use auth::AuthManagerLayer;
 use axum::{Extension, Router};
+
+#[cfg(feature = "ssl")]
 use axum_server::tls_rustls::RustlsConfig;
+
 use deadpool_redis::Pool as RedisPool;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
