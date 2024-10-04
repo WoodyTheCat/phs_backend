@@ -3,3 +3,4 @@
 /pages/dist/*.html
 /pages/specs/*.json
 Cargo.lock
+.env
