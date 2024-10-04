@@ -1,3 +1,4 @@
 enforced-import-renames = [
     { path = "serde_json::Value", rename = "JsonValue" },
+    { path = "sqlx::Type", rename = "SqlxType" },
 ]

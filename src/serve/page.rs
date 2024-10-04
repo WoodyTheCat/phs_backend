@@ -18,7 +18,8 @@ use tracing::instrument;
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
     error::PhsError,
-    PaginationOptions,
+    resources::HasSqlxQueryString,
+    CursorOptions, CursorResponse,
 };
 
 use super::{render::Renderer, DynamicPageData, DynamicPageMetadata};
@@ -141,7 +142,7 @@ async fn put_dynamic_page(
 
     tokio::fs::rename(temp_path, spec_path).await?;
 
-    Renderer::render_fragment(PathBuf::from(fragment_path), data).await?;
+    Renderer::render_fragment(fragment_path, data).await?;
 
     Ok(())
 }
@@ -150,26 +151,24 @@ async fn get_dynamic_page_metadata(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::ManagePages as u8 }>,
 
+    Query(cursor_options): Query<CursorOptions>,
+    Query(query_string): Query<<DynamicPageMetadata as HasSqlxQueryString>::QueryString>,
+
     Extension(pool): Extension<PgPool>,
-    Query(pagination): Query<PaginationOptions>,
-) -> Result<Json<Vec<DynamicPageMetadata>>, PhsError> {
-    let pages = sqlx::query_as!(
-        DynamicPageMetadata,
+) -> Result<Json<CursorResponse<DynamicPageMetadata>>, PhsError> {
+    let pages = crate::resources::paginated_query_as::<DynamicPageMetadata>(
         r#"
             SELECT
             id, name, created_at, updated_at, modified as "modified: _"
             FROM pages
-            ORDER BY name DESC
-            LIMIT LEAST($1, 100)
-            OFFSET $2
         "#,
-        pagination.page_size,
-        i64::from(pagination.page_size * pagination.page)
+        cursor_options,
+        query_string,
+        &pool,
     )
-    .fetch_all(&pool)
     .await?;
 
-    Ok(Json(pages))
+    Ok(Json(CursorResponse::new(pages)))
 }
 
 #[instrument(skip(pool, _auth_session))]
@@ -188,13 +187,11 @@ async fn post_deploy_dynamic_pages(
     .fetch_all(&pool)
     .await?;
 
-    // FIXME: Only one endpoint can use the instance at a time...
-    let tera = &mut tera.lock().await;
-
     tracing::debug!(?pages, "Pages to deploy");
 
     for page_name in pages {
-        deploy_page(page_name, tera).await?;
+        // FIXME: Only one endpoint can use the instance at a time...
+        deploy_page(page_name, &mut *tera.lock().await).await?;
     }
 
     Ok(())

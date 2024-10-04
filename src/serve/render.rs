@@ -14,7 +14,7 @@ impl DynamicPageElement {
         match self {
             Self::Header { size, contents } => Self::render_header(size, &contents),
             Self::Text { components } => Self::render_text(components, ("<p>", "</p>")),
-            Self::List { items, list_type } => Self::render_list(items, list_type),
+            Self::List { items, list_type } => Self::render_list(items, &list_type),
         }
     }
 
@@ -30,7 +30,7 @@ impl DynamicPageElement {
         let (opening, mut closing): (Vec<_>, Vec<_>) = component
             .modifiers
             .into_iter()
-            .map(TextModifier::to_tag)
+            .map(TextModifier::into_tag)
             .unzip();
 
         closing.reverse();
@@ -44,7 +44,7 @@ impl DynamicPageElement {
         format!("{}{}{}", opening.concat(), content, closing.concat())
     }
 
-    fn render_list(items: Vec<Vec<TextComponent>>, list_type: ListType) -> String {
+    fn render_list(items: Vec<Vec<TextComponent>>, list_type: &ListType) -> String {
         let wrappers = match list_type {
             ListType::Unordered => ("<ul>", "</ul>"),
             ListType::Ordered => ("<ol>", "</ol>"),
@@ -58,7 +58,7 @@ impl DynamicPageElement {
     }
 
     fn render_header(size: HeaderSize, contents: &str) -> String {
-        let (opening, closing) = size.to_tag();
+        let (opening, closing) = size.into_tag();
 
         format!("{opening}{contents}{closing}")
     }

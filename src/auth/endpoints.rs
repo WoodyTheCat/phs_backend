@@ -12,8 +12,8 @@ use sqlx::PgPool;
 use crate::{
     auth::{AuthUser, Permission},
     error::PhsError,
-    resources::User,
-    PaginationOptions,
+    resources::{HasSqlxQueryString, Role},
+    CursorOptions, CursorResponse,
 };
 
 use super::{AuthSession, Group, RequirePermission};
@@ -42,10 +42,19 @@ async fn login(
     Extension(pool): Extension<PgPool>,
     Json(credentials): Json<PostLoginBody>,
 ) -> Result<String, PhsError> {
+    // TODO: Consolodate queries and remove UserWithHash type
+    struct UserWithHash {
+        id: i32,
+        username: String,
+        role: Role,
+        hash: String,
+        permissions: Vec<Permission>,
+    }
+
     let user = sqlx::query_as!(
-        User,
+        UserWithHash,
         r#"
-        SELECT id, name, username, role as "role: _", description, department, hash, permissions as "permissions: _"
+        SELECT id, username, role as "role: _", hash, permissions as "permissions: _"
         FROM users
         WHERE username = $1
         "#,
@@ -72,7 +81,7 @@ async fn login(
     let group_data = sqlx::query_as!(
         Group,
         r#"
-        SELECT id, name, permissions as "permissions: _"
+        SELECT id, group_name, permissions as "permissions: _"
         FROM users_groups
         INNER JOIN groups
         ON groups.id = users_groups.group_id
@@ -92,7 +101,7 @@ async fn login(
     // Add the user's override permissions to the vector
     permissions.extend(&user.permissions);
 
-    let groups = group_data.into_iter().map(|gd| gd.name).collect();
+    let groups = group_data.into_iter().map(|gd| gd.group_name).collect();
 
     let auth_user = AuthUser {
         id: user.id,
@@ -134,24 +143,20 @@ async fn get_groups(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
-    pagination: Query<PaginationOptions>,
+    Query(cursor_options): Query<CursorOptions>,
+    Query(query_string): Query<<Group as HasSqlxQueryString>::QueryString>,
+
     Extension(pool): Extension<PgPool>,
-) -> Result<Json<Vec<Group>>, PhsError> {
-    let groups = sqlx::query_as!(
-        Group,
-        r#"
-        SELECT id, name, permissions as "permissions: Vec<Permission>"
-        FROM groups
-        LIMIT LEAST(100, $1)
-        OFFSET $2
-        "#,
-        pagination.page_size,
-        i64::from(pagination.page * pagination.page_size)
+) -> Result<Json<CursorResponse<Group>>, PhsError> {
+    let groups = crate::resources::paginated_query_as::<Group>(
+        r"SELECT id, group_name, permissions FROM groups",
+        cursor_options,
+        query_string,
+        &pool,
     )
-    .fetch_all(&pool)
     .await?;
 
-    Ok(Json(groups))
+    Ok(Json(CursorResponse::new(groups)))
 }
 
 #[derive(Deserialize)]
@@ -170,9 +175,9 @@ async fn create_group(
     let group = sqlx::query_as!(
         Group,
         r#"
-        insert into groups(name, permissions)
+        insert into groups(group_name, permissions)
         values ($1, $2)
-        returning id, name, permissions as "permissions: _"
+        returning id, group_name, permissions as "permissions: _"
         "#,
         body.group_name,
         body.permissions as Vec<Permission>
@@ -201,9 +206,9 @@ async fn put_group(
         Group,
         r#"
         update groups
-        set name = $1, permissions = $2
+        set group_name = $1, permissions = $2
         where id = $3
-        returning id, name, permissions as "permissions: _"
+        returning id, group_name, permissions as "permissions: _"
         "#,
         body.group_name,
         body.permissions as Vec<Permission>,

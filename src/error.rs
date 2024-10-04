@@ -8,11 +8,15 @@ use axum::{
 use crate::sessions;
 
 #[derive(Debug)]
-pub struct PhsError(pub StatusCode, pub Option<Box<dyn Debug>>, pub &'static str);
+pub struct PhsError(
+    pub StatusCode,
+    pub Option<Box<dyn Debug + Send>>,
+    pub &'static str,
+);
 
 impl IntoResponse for PhsError {
     fn into_response(self) -> Response {
-        tracing::error!(error = ?self.1, "Error {}: {}:", self.0, self.2);
+        tracing::error!(error = ?self.1, "Error {}: {}", self.0, self.2);
 
         // Return the canonical reason to remain ambiguous about system workings
         (self.0, self.0.canonical_reason().unwrap()).into_response()

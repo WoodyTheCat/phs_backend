@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, username, role as \"role: _\", description, department, hash, permissions as \"permissions: _\"\n        FROM users\n        WHERE username = $1\n        ",
+  "query": "\n        SELECT id, username, role as \"role: _\", hash, permissions as \"permissions: _\"\n        FROM users\n        WHERE username = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -10,16 +10,11 @@
       },
       {
         "ordinal": 1,
-        "name": "name",
-        "type_info": "Varchar"
-      },
-      {
-        "ordinal": 2,
         "name": "username",
         "type_info": "Varchar"
       },
       {
-        "ordinal": 3,
+        "ordinal": 2,
         "name": "role: _",
         "type_info": {
           "Custom": {
@@ -34,22 +29,12 @@
         }
       },
       {
-        "ordinal": 4,
-        "name": "description",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 5,
-        "name": "department",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 6,
+        "ordinal": 3,
         "name": "hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 4,
         "name": "permissions: _",
         "type_info": {
           "Custom": {
@@ -86,11 +71,8 @@
       false,
       false,
       false,
-      false,
-      true,
-      false,
       false
     ]
   },
-  "hash": "bf0ae73808bd463efda6b7d904da3101807777e4086bc09a9fc4051940c72ee5"
+  "hash": "5547ba3e4c3fac2625482685998e37657095f409afca4a43eaaca52aa5aa361c"
 }

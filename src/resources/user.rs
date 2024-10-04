@@ -20,38 +20,10 @@ use tracing::instrument;
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
     error::PhsError,
+    CursorOptions, CursorPaginatable, CursorResponse,
 };
 
-use super::Department;
-
-#[derive(Serialize, Deserialize, sqlx::Type, Debug, Clone, PartialEq, Eq)]
-#[sqlx(type_name = "role", rename_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    Teacher,
-    Admin,
-}
-
-#[derive(Serialize, Deserialize, FromRow, Clone)]
-pub struct User {
-    pub id: i32,
-    pub username: String,
-    pub hash: String, // A PHC-format hash string of the user's password
-
-    pub name: String,
-    pub role: Role,
-
-    pub description: String,
-    pub department: Option<i32>,
-
-    pub permissions: Vec<Permission>,
-}
-
-impl Debug for User {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "User {}", self.id)
-    }
-}
+use super::{Department, HasSqlxQueryString, SqlxQueryString};
 
 pub fn router() -> Router {
     Router::new()
@@ -62,6 +34,91 @@ pub fn router() -> Router {
         )
         .route("/v1/users/change_password", get(change_password))
         .route("/v1/users/reset_password", get(reset_password))
+}
+
+#[derive(Serialize, Deserialize, sqlx::Type, Debug, Clone, Copy, PartialEq, Eq)]
+#[sqlx(type_name = "role", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    Teacher,
+    Admin,
+}
+
+#[derive(Serialize, Deserialize, FromRow)]
+struct UserNoHash {
+    id: i32,
+    username: String,
+    name: String,
+
+    description: String,
+    department: Option<i32>,
+
+    role: Role,
+    permissions: Vec<Permission>,
+}
+
+impl HasSqlxQueryString for UserNoHash {
+    type QueryString = UserNoHashQueryString;
+}
+
+#[derive(Debug, Deserialize)]
+struct UserNoHashQueryString {
+    id: Option<i32>,
+    username: Option<String>,
+    name: Option<String>,
+
+    #[serde(default, with = "::serde_with::rust::double_option")]
+    department: Option<Option<i32>>,
+    role: Option<Role>,
+
+    sort_by: Option<String>,
+}
+
+impl SqlxQueryString for UserNoHashQueryString {
+    fn where_clause<'a>(&'a self, builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>) {
+        if let Some(id) = self.id {
+            builder.push(" AND id = ");
+            builder.push_bind(id);
+        }
+
+        if let Some(ref name) = self.name {
+            builder.push(" AND name LIKE ");
+            builder.push_bind(name);
+        }
+
+        if let Some(ref username) = self.username {
+            builder.push(" AND username LIKE ");
+            builder.push_bind(username);
+        }
+
+        if let Some(department) = self.department {
+            builder.push(" AND department = ");
+            builder.push_bind(department);
+        }
+
+        if let Some(role) = self.role {
+            builder.push(" AND role = ");
+            builder.push_bind(role);
+        }
+    }
+
+    fn order_by_clause<'a>(&'a self, builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>) {
+        let Some((field, order)) = Self::parse_sort_by(&self.sort_by) else {
+            return;
+        };
+
+        if let s @ ("id" | "name" | "modified" | "created_at" | "updated_at") = field.as_str() {
+            builder.push(" ");
+            builder.push(s);
+            order.append_to(builder);
+        }
+    }
+}
+
+impl CursorPaginatable for UserNoHash {
+    fn id(&self) -> i32 {
+        self.id
+    }
 }
 
 #[derive(Deserialize, Debug)]
@@ -140,32 +197,6 @@ async fn create_user(
 
     Ok(Json(user))
 }
-//
-//#[derive(Serialize)]
-//struct UserSafe {
-//    id: i32,
-//    name: String,
-//    username: String,
-//
-//    description: String,
-//    department: Option<i32>,
-//
-//
-//    role: Role,
-//}
-
-#[derive(Serialize)]
-struct UserNoHash {
-    id: i32,
-    username: String,
-    name: String,
-
-    description: String,
-    department: Option<i32>,
-
-    role: Role,
-    permissions: Vec<Permission>,
-}
 
 #[instrument(skip(pool))]
 async fn get_user(
@@ -192,10 +223,12 @@ async fn get_users(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
+    Query(cursor_options): Query<CursorOptions>,
+    Query(query_string): Query<<UserNoHash as HasSqlxQueryString>::QueryString>,
+
     Extension(pool): Extension<PgPool>,
-) -> Result<Json<Vec<UserNoHash>>, PhsError> {
-    let users_no_hash = sqlx::query_as!(
-        UserNoHash,
+) -> Result<Json<CursorResponse<UserNoHash>>, PhsError> {
+    let users_no_hash = super::paginated_query_as::<UserNoHash>(
         r#"
         SELECT id,
             name,
@@ -206,11 +239,13 @@ async fn get_users(
             permissions as "permissions: _"
         FROM users
         "#,
+        cursor_options,
+        query_string,
+        &pool,
     )
-    .fetch_all(&pool)
     .await?;
 
-    Ok(Json(users_no_hash))
+    Ok(Json(CursorResponse::new(users_no_hash)))
 }
 
 #[derive(Deserialize, Debug)]

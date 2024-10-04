@@ -4,15 +4,17 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{prelude::FromRow, PgPool};
+use sqlx::{prelude::FromRow, PgPool, QueryBuilder};
 use time::OffsetDateTime;
 use tracing::instrument;
 
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
     error::PhsError,
-    PaginationOptions,
+    CursorOptions, CursorPaginatable, CursorResponse,
 };
+
+use super::{HasSqlxQueryString, SqlxQueryString};
 
 pub fn router() -> Router {
     Router::new()
@@ -39,49 +41,121 @@ pub struct Post {
     category: Option<i32>,
 }
 
+impl HasSqlxQueryString for Post {
+    type QueryString = PostQueryString;
+}
+
 #[derive(Deserialize, Debug)]
-struct PostSelectOptions {
-    category: Option<i32>,
-    department: Option<i32>,
-    author: Option<i32>,
+pub struct PostQueryString {
+    id: Option<i32>,
+    title: Option<String>,
+    author: Option<Option<i32>>,
+
+    #[serde(with = "time::serde::iso8601::option", rename = "date[gte]")]
+    date_gte: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::iso8601::option", rename = "date[lte]")]
+    date_lte: Option<OffsetDateTime>,
+
+    pinned: Option<bool>,
+    #[serde(default, with = "::serde_with::rust::double_option")]
+    department: Option<Option<i32>>,
+    #[serde(default, with = "::serde_with::rust::double_option")]
+    category: Option<Option<i32>>,
+
+    sort_by: Option<String>,
+}
+
+impl SqlxQueryString for PostQueryString {
+    fn where_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {
+        if let Some(id) = self.id {
+            builder.push(" AND id = ");
+            builder.push_bind(id);
+        }
+
+        if let Some(title) = &self.title {
+            builder.push(" AND title LIKE ");
+            builder.push_bind(title);
+        }
+
+        if let Some(author) = &self.author {
+            builder.push(" AND author = ");
+            builder.push_bind(author);
+        }
+
+        if let Some(date_lte) = &self.date_lte {
+            builder.push(" AND created <= ");
+            builder.push_bind(date_lte);
+        }
+
+        if let Some(date_gte) = &self.date_gte {
+            builder.push(" AND created >= ");
+            builder.push_bind(date_gte);
+        }
+
+        if let Some(pinned) = self.pinned {
+            builder.push(" AND pinned = ");
+            builder.push_bind(pinned);
+        }
+
+        if let Some(department) = &self.department {
+            builder.push(" AND department = ");
+            builder.push_bind(department);
+        }
+
+        if let Some(category) = &self.category {
+            builder.push(" AND category = ");
+            builder.push_bind(category);
+        }
+    }
+
+    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {
+        let Some((field, order)) = Self::parse_sort_by(&self.sort_by) else {
+            builder.push(", pinned DESC, date DESC");
+            return;
+        };
+
+        if let s @ ("id" | "title" | "content" | "author" | "date" | "pinned" | "department"
+        | "category") = field.as_str()
+        {
+            builder.push(" ");
+            builder.push(s);
+            order.append_to(builder);
+        }
+    }
+}
+
+impl CursorPaginatable for Post {
+    fn id(&self) -> i32 {
+        self.id
+    }
 }
 
 #[instrument(skip(pool))]
 async fn get_posts(
+    Query(query_string): Query<<Post as HasSqlxQueryString>::QueryString>,
+    Query(cursor_options): Query<CursorOptions>,
+
     Extension(pool): Extension<PgPool>,
-    select_options: Query<PostSelectOptions>,
-    pagination: Query<PaginationOptions>,
-) -> Result<Json<Vec<Post>>, PhsError> {
-    let posts = sqlx::query_as!(
-        Post,
+) -> Result<Json<CursorResponse<Post>>, PhsError> {
+    let posts: Vec<Post> = super::paginated_query_as::<Post>(
         r#"
-            SELECT id,
-                title,
-                content,
-                pinned,
-                department,
-                category,
-                author,
-                date as "date: _"
-            FROM posts
-            WHERE ($1::integer IS NULL OR author = $1)
-              AND ($2::integer IS NULL OR category = $2)
-              AND ($3::integer IS NULL OR department = $3)
-            ORDER BY pinned DESC,
-                date DESC
-            LIMIT LEAST(100, $4)
-            OFFSET $5
-            "#,
-        select_options.author,
-        select_options.category,
-        select_options.department,
-        pagination.page_size,
-        i64::from(pagination.page * pagination.page_size)
+        SELECT id,
+          title,
+          content,
+          pinned,
+          department,
+          category,
+          author,
+          date as "date: _"
+        FROM posts
+        "#,
+        cursor_options,
+        query_string,
+        &pool,
     )
-    .fetch_all(&pool)
     .await?;
 
-    Ok(Json(posts))
+    Ok(Json(CursorResponse::new(posts)))
 }
 
 #[instrument(skip(pool))]

@@ -15,6 +15,7 @@ use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
 use sqlx::{postgres::PgPoolOptions, Postgres};
 use tera::Tera;
 use tokio::sync::Mutex;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 //use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 type DbPool = sqlx::Pool<Postgres>;
@@ -22,48 +23,48 @@ type DbPool = sqlx::Pool<Postgres>;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Initiate logging
-    //tracing_subscriber::registry()
-    //    .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
-    //        #[cfg(debug_assertions)]
-    //        |_| "trace,sqlx=info,fred=info".into(),
-    //        #[cfg(not(debug_assertions))]
-    //        |_| "info,sqlx=info,fred=info".into(),
-    //    )))
-    //    .with(
-    //        #[cfg(debug_assertions)]
-    //        tracing_subscriber::fmt::layer()
-    //            .pretty()
-    //            .with_file(true)
-    //            .with_line_number(true)
-    //            .with_thread_ids(true),
-    //        #[cfg(not(debug_assertions))]
-    //        tracing_subscriber::fmt::layer()
-    //            .compact()
-    //            .with_thread_ids(true),
-    //    )
-    //    .try_init()?;
-
-    console_subscriber::Builder::default()
-        .filter_env_var(
-            std::env::var("RUST_LOG").unwrap_or_else(
-                #[cfg(debug_assertions)]
-                |_| "trace,sqlx=info,fred=info,tokio=trace,runtime=trace".into(),
-                #[cfg(not(debug_assertions))]
-                |_| "info,sqlx=info,fred=info".into(),
-            ), //.with(
-               //    #[cfg(debug_assertions)]
-               //    tracing_subscriber::fmt::layer()
-               //        .pretty()
-               //        .with_file(true)
-               //        .with_line_number(true)
-               //        .with_thread_ids(true),
-               //    #[cfg(not(debug_assertions))]
-               //    tracing_subscriber::fmt::layer()
-               //        .compact()
-               //        .with_thread_ids(true),
+    tracing_subscriber::registry()
+        .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
+            #[cfg(debug_assertions)]
+            |_| "debug,sqlx=info,fred=info".into(),
+            #[cfg(not(debug_assertions))]
+            |_| "info,sqlx=info,fred=info".into(),
+        )))
+        .with(
+            #[cfg(debug_assertions)]
+            tracing_subscriber::fmt::layer()
+                .pretty()
+                .with_file(true)
+                .with_line_number(true)
+                .with_thread_ids(true),
+            #[cfg(not(debug_assertions))]
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_thread_ids(true),
         )
-        .server_addr(([127, 0, 0, 1], 5555))
-        .init();
+        .try_init()?;
+
+    //console_subscriber::Builder::default()
+    //    .filter_env_var(
+    //        std::env::var("RUST_LOG").unwrap_or_else(
+    //            #[cfg(debug_assertions)]
+    //            |_| "trace,sqlx=info,fred=info,tokio=trace,runtime=trace".into(),
+    //            #[cfg(not(debug_assertions))]
+    //            |_| "info,sqlx=info,fred=info".into(),
+    //        ), //.with(
+    //           //    #[cfg(debug_assertions)]
+    //           //    tracing_subscriber::fmt::layer()
+    //           //        .pretty()
+    //           //        .with_file(true)
+    //           //        .with_line_number(true)
+    //           //        .with_thread_ids(true),
+    //           //    #[cfg(not(debug_assertions))]
+    //           //    tracing_subscriber::fmt::layer()
+    //           //        .compact()
+    //           //        .with_thread_ids(true),
+    //    )
+    //    .server_addr(([127, 0, 0, 1], 5555))
+    //    .init();
 
     let db = init_db().await?;
     let redis_pool = init_redis()?;

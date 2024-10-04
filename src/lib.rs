@@ -113,10 +113,42 @@ pub async fn serve(
     Ok(())
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct PaginationOptions {
-    pub page: i32,
-    pub page_size: i32,
+#[derive(Deserialize, Debug, Serialize)]
+pub struct CursorOptions {
+    #[serde(default)]
+    cursor: i32,
+    #[serde(default = "_default_cursor_length")]
+    length: i32,
 }
 
-pub type TeraState = Arc<Mutex<Tera>>;
+#[rustfmt::skip]
+const fn _default_cursor_length() -> i32 { 20 }
+
+#[derive(Deserialize, Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CursorResponse<T> {
+    next_cursor: i32,
+    previous_cursor: i32,
+
+    data: Vec<T>,
+}
+
+trait CursorPaginatable {
+    fn id(&self) -> i32;
+}
+
+impl<T: CursorPaginatable> CursorResponse<T> {
+    fn new(data: Vec<T>) -> Self {
+        let (previous_cursor, next_cursor) = (
+            data.first().map_or(0, |v| <T as CursorPaginatable>::id(v)),
+            data.last().map_or(0, |v| <T as CursorPaginatable>::id(v)),
+        );
+
+        Self {
+            next_cursor,
+            previous_cursor,
+
+            data,
+        }
+    }
+}

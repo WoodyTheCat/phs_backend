@@ -1,14 +1,15 @@
-use crate::error::PhsError;
+use crate::{
+    error::PhsError,
+    resources::{HasSqlxQueryString, SqlxQueryString},
+    CursorPaginatable,
+};
 use axum::{
     async_trait,
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{
-    postgres::{PgHasArrayType, PgTypeInfo},
-    prelude::FromRow,
-};
+use sqlx::{prelude::FromRow, QueryBuilder};
 
 use super::AuthSession;
 
@@ -76,6 +77,49 @@ impl<S, const PERMISSION: u8> FromRequestParts<S> for RequirePermission<PERMISSI
 #[derive(Clone, FromRow, Serialize, Deserialize, Debug)]
 pub struct Group {
     pub id: i32,
-    pub name: String, // ERROR used to be group_name
+    pub group_name: String,
     pub permissions: Vec<Permission>,
+}
+
+impl HasSqlxQueryString for Group {
+    type QueryString = GroupQueryString;
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GroupQueryString {
+    id: Option<i32>,
+    group_name: Option<String>,
+    sort_by: Option<String>,
+}
+
+impl SqlxQueryString for GroupQueryString {
+    fn where_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {
+        if let Some(ref group_name) = self.group_name {
+            builder.push(" AND group_name LIKE ");
+            builder.push_bind(group_name);
+        }
+
+        if let Some(id) = self.id {
+            builder.push(" AND id = ");
+            builder.push_bind(id);
+        }
+    }
+
+    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {
+        let Some((field, order)) = Self::parse_sort_by(&self.sort_by) else {
+            return;
+        };
+
+        if let s @ ("id" | "group_name") = field.as_str() {
+            builder.push(" ");
+            builder.push(s);
+            order.append_to(builder);
+        }
+    }
+}
+
+impl CursorPaginatable for Group {
+    fn id(&self) -> i32 {
+        self.id
+    }
 }
