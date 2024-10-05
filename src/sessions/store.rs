@@ -29,6 +29,8 @@ pub enum SessionStoreError {
     Rand(#[from] rand_core::Error),
     #[error("Miscellaneous error: {0}")]
     Misc(String),
+    #[error("Session not found")]
+    NotFound,
 }
 
 /// A Redis session store.
@@ -121,16 +123,18 @@ impl SessionStore {
             .arg("$")
             .query_async::<Option<String>>(&mut conn)
             .await?
-            .ok_or(SessionStoreError::Misc(String::from(
-                "Nil returned from Redis, user session not found",
-            )))?;
+            .ok_or(SessionStoreError::NotFound)?;
 
         let returned_values = serde_json::from_str::<Vec<SessionStoreData>>(&query)?;
 
-        if returned_values.len() != 1 {
-            return Err(SessionStoreError::Misc(
-                "Multiple or no values returned from JSON.GET".to_string(),
-            ));
+        if returned_values.is_empty() {
+            return Err(SessionStoreError::NotFound);
+        }
+
+        if returned_values.len() > 1 {
+            return Err(SessionStoreError::Misc(String::from(
+                "Multiple values returned from JSON.GET",
+            )));
         }
 
         let data = returned_values.first().unwrap();

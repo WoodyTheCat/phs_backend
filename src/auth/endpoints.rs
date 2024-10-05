@@ -117,6 +117,9 @@ async fn login(
     // Explicitly save the session so the ID is populated
     session.save().await?;
 
+    // Then cycle the ID to prevent session fixation
+    session.cycle_id().await?;
+
     let hashed_id = session.get_hashed_id().await.ok_or(PhsError(
         StatusCode::INTERNAL_SERVER_ERROR,
         None,
@@ -125,7 +128,7 @@ async fn login(
 
     tracing::info!({ user = ?user.id, hashed_id }, "Successful login");
 
-    Ok("Logged in!".into())
+    Ok("Logged in".into())
 }
 
 async fn whoami(session: AuthSession) -> Result<Json<i32>, PhsError> {

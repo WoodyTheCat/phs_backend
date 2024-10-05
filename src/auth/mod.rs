@@ -75,7 +75,7 @@ impl<'a> AuthSession {
         &self.auth_user
     }
 
-    pub async fn from_session(session: Session) -> Result<Option<Self>, PhsError> {
+    pub async fn from_session(session: Session) -> Result<Option<Self>, crate::sessions::Error> {
         let s = session
             .get()
             .await?

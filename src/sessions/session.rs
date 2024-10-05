@@ -15,8 +15,6 @@ use crate::auth::AuthUser;
 
 use super::{Error, Result, SessionStore};
 
-const DEFAULT_DURATION: Duration = Duration::weeks(2);
-
 #[derive(Clone)]
 pub struct Session {
     store: Arc<SessionStore>,
@@ -158,17 +156,6 @@ impl Session {
         Ok(())
     }
 
-    /*
-    /// Gets a value from the store.
-    pub async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        Ok(self
-            .get_value(key)
-            .await?
-            .map(serde_json::from_value)
-            .transpose()?)
-    }
-    */
-
     /// Gets an [`AuthUser`] from the store.
     pub async fn get(&self) -> Result<Option<AuthUser>> {
         self.maybe_load().await?;
@@ -270,9 +257,6 @@ impl Session {
             session_data.id = IdType::Id(id);
         }
 
-        // Actually, no. Doing this stops the session from being saved to a cookie
-        // session_data.should_save = false;
-
         Ok(())
     }
 
@@ -342,15 +326,20 @@ impl Session {
         // *self.inner.session_id.lock() = None; // Setting `None` ensures `save` invokes the store's
         //                                       // `create` method.
 
-        let session_data = &mut *self.session_data.lock().await;
+        // Self::save also obtains a mutex lock, so we have to drop it to avoid deadlocks
+        {
+            let session_data = &mut self.session_data.lock().await;
 
-        let IdType::Id(old_id) = std::mem::replace(&mut session_data.id, IdType::None) else {
-            return Ok(());
-        };
+            let IdType::Id(old_id) = std::mem::replace(&mut session_data.id, IdType::None) else {
+                return Ok(());
+            };
 
-        self.store.delete(&old_id).await.map_err(Error::Store)?;
+            self.store.delete(&old_id).await.map_err(Error::Store)?;
 
-        session_data.should_save = true;
+            session_data.should_save = true;
+        }
+
+        self.save().await?;
 
         Ok(())
     }
@@ -400,15 +389,10 @@ impl FromStr for Id {
 /// Session expiry configuration.
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Expiry {
-    /// Expire on [current session end][current-session-end], as defined by the
-    /// browser.
-    ///
-    /// [current-session-end]: https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies#define_the_lifetime_of_a_cookie
+    /// Expire on current session end, as defined by the browser.
     OnSessionEnd,
 
     /// Expire on inactivity.
-    ///
-    /// Reading a session is not considered activity for expiration purposes.
     /// [`Session`] expiration is computed from the last time the session was
     /// _modified_.
     OnInactivity(Duration),
@@ -419,6 +403,8 @@ pub enum Expiry {
     /// [`set_expiry`](Session::set_expiry).
     AtDateTime(OffsetDateTime),
 }
+
+const DEFAULT_DURATION: Duration = Duration::weeks(2);
 
 impl Expiry {
     /// Get session expiry as `OffsetDateTime`.

@@ -72,9 +72,10 @@ where
                     Ok(Some(auth_session)) => {
                         req.extensions_mut().insert(auth_session);
                     }
-                    Err(e) => {
-                        tracing::error!(?e, "Error when converting Session to AuthSession");
-                        return Ok(e.into_response());
+                    Err(error) => {
+                        tracing::error!(?error, "Error when converting Session to AuthSession");
+
+                        return Ok(Into::<PhsError>::into(error).into_response());
                     }
                     _ => {}
                 }

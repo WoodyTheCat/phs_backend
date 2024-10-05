@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+use thiserror::Error;
+
 pub use self::{
     service::{CookieController, SessionConfig, SessionManager, SessionManagerLayer},
     session::{Expiry, IdType, Session},
@@ -14,15 +16,22 @@ mod session;
 mod store;
 
 /// Session errors.
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
-    /// Maps `serde_json` errors.
-    #[error(transparent)]
-    SerdeJson(#[from] serde_json::Error),
+    #[error("Redis session store error: {0}")]
+    Store(SessionStoreError),
 
-    /// Maps `session_store::Error` errors.
-    #[error(transparent)]
-    Store(#[from] SessionStoreError),
+    #[error("Session not found")]
+    SessionNotFound,
+}
+
+impl From<SessionStoreError> for Error {
+    fn from(value: SessionStoreError) -> Self {
+        match value {
+            SessionStoreError::NotFound => Self::SessionNotFound,
+            e => Self::Store(e),
+        }
+    }
 }
 
 type Result<T> = std::result::Result<T, Error>;

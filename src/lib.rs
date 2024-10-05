@@ -65,7 +65,7 @@ pub fn app(db: PgPool, redis_pool: RedisPool, tera: Arc<Mutex<Tera>>) -> Router 
         .layer(Extension(redis_pool))
         .layer(Extension(tera))
         .layer(auth_layer)
-        .layer(CorsLayer::permissive()) // TODO WARN: Restrict for prod build
+        .layer(CorsLayer::very_permissive().allow_credentials(true)) // TODO WARN: Restrict for prod build
 }
 
 #[allow(clippy::missing_panics_doc)]

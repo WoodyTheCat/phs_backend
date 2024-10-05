@@ -217,7 +217,7 @@ where
                 let empty = session.is_empty().await;
 
                 match session_cookie {
-                    Some(mut cookie) if empty => {
+                    Some(mut cookie) if empty || res.status() == StatusCode::UNAUTHORIZED => {
                         // Path and domain must be manually set to ensure a proper removal cookie is
                         // constructed.
                         //

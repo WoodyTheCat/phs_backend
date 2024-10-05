@@ -71,11 +71,16 @@ impl From<tokio::task::JoinError> for PhsError {
 
 impl From<sessions::Error> for PhsError {
     fn from(e: sessions::Error) -> Self {
-        Self(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Some(Box::new(e)),
-            "Sessions error",
-        )
+        match e {
+            sessions::Error::SessionNotFound => {
+                Self(StatusCode::UNAUTHORIZED, None, "Session not found")
+            }
+            _ => Self(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Some(Box::new(e)),
+                "Sessions error",
+            ),
+        }
     }
 }
 

@@ -45,7 +45,7 @@ pub enum Role {
 }
 
 #[derive(Serialize, Deserialize, FromRow)]
-struct UserNoHash {
+struct User {
     id: i32,
     username: String,
     name: String,
@@ -57,12 +57,12 @@ struct UserNoHash {
     permissions: Vec<Permission>,
 }
 
-impl HasSqlxQueryString for UserNoHash {
-    type QueryString = UserNoHashQueryString;
+impl HasSqlxQueryString for User {
+    type QueryString = UserQueryString;
 }
 
 #[derive(Debug, Deserialize)]
-struct UserNoHashQueryString {
+struct UserQueryString {
     id: Option<i32>,
     username: Option<String>,
     name: Option<String>,
@@ -74,7 +74,7 @@ struct UserNoHashQueryString {
     sort_by: Option<String>,
 }
 
-impl SqlxQueryString for UserNoHashQueryString {
+impl SqlxQueryString for UserQueryString {
     fn where_clause<'a>(&'a self, builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>) {
         if let Some(id) = self.id {
             builder.push(" AND id = ");
@@ -115,7 +115,7 @@ impl SqlxQueryString for UserNoHashQueryString {
     }
 }
 
-impl CursorPaginatable for UserNoHash {
+impl CursorPaginatable for User {
     fn id(&self) -> i32 {
         self.id
     }
@@ -138,7 +138,7 @@ async fn create_user(
 
     Extension(pool): Extension<PgPool>,
     Json(req): Json<CreateUserRequest>,
-) -> Result<Json<UserNoHash>, PhsError> {
+) -> Result<Json<User>, PhsError> {
     if req.department.is_some()
         && sqlx::query_as!(
             Department,
@@ -173,7 +173,7 @@ async fn create_user(
         .to_string();
 
     let user = sqlx::query_as!(
-        UserNoHash,
+        User,
         r#"
         INSERT INTO users (name, username, role, description, department, hash)
         VALUES ($1, $2, $3, $4, $5, $6)
@@ -202,9 +202,9 @@ async fn create_user(
 async fn get_user(
     Path(id): Path<i32>,
     Extension(pool): Extension<PgPool>,
-) -> Result<Json<UserNoHash>, PhsError> {
+) -> Result<Json<User>, PhsError> {
     let user = sqlx::query_as!(
-        UserNoHash,
+        User,
         r#"
         SELECT id, name, username, role as "role: Role", description, department, permissions as "permissions: Vec<Permission>"
         FROM users
@@ -224,11 +224,11 @@ async fn get_users(
     _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
     Query(cursor_options): Query<CursorOptions>,
-    Query(query_string): Query<<UserNoHash as HasSqlxQueryString>::QueryString>,
+    Query(query_string): Query<<User as HasSqlxQueryString>::QueryString>,
 
     Extension(pool): Extension<PgPool>,
-) -> Result<Json<CursorResponse<UserNoHash>>, PhsError> {
-    let users_no_hash = super::paginated_query_as::<UserNoHash>(
+) -> Result<Json<CursorResponse<User>>, PhsError> {
+    let users_no_hash = super::paginated_query_as::<User>(
         r#"
         SELECT id,
             name,
@@ -265,9 +265,9 @@ async fn put_user(
     Query(id): Query<i32>,
     Extension(pool): Extension<PgPool>,
     Json(body): Json<PutUserBody>,
-) -> Result<Json<UserNoHash>, PhsError> {
+) -> Result<Json<User>, PhsError> {
     let user_no_hash = sqlx::query_as!(
-        UserNoHash,
+        User,
         r#"
         UPDATE users SET
             username = $1,
