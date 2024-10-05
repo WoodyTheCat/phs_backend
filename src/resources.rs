@@ -46,10 +46,8 @@ impl SortOrder {
 }
 
 pub trait SqlxQueryString {
-    #[allow(unused_variables)]
-    fn where_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {}
-    #[allow(unused_variables)]
-    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {}
+    fn where_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>);
+    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) -> bool;
 
     fn parse_sort_by(sort_by: &Option<String>) -> Option<(String, SortOrder)> {
         sort_by.as_ref().map(|sb| {
@@ -82,9 +80,13 @@ where
 
     query_string.where_clause(&mut query_builder);
 
-    query_builder.push(r#" ORDER BY id ASC"#);
+    query_builder.push(" ORDER BY ");
 
-    query_string.order_by_clause(&mut query_builder);
+    if query_string.order_by_clause(&mut query_builder) {
+        query_builder.push(", ");
+    }
+
+    query_builder.push("id ASC");
 
     query_builder.push(" LIMIT ").push_bind(cursor.length);
 

@@ -105,15 +105,17 @@ impl SqlxQueryString for GroupQueryString {
         }
     }
 
-    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {
+    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) -> bool {
         let Some((field, order)) = Self::parse_sort_by(&self.sort_by) else {
-            return;
+            return false;
         };
 
         if let s @ ("id" | "group_name") = field.as_str() {
-            builder.push(" ");
             builder.push(s);
             order.append_to(builder);
+            true
+        } else {
+            false
         }
     }
 }

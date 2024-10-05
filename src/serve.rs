@@ -159,15 +159,17 @@ impl SqlxQueryString for DynamicPageMetadataQueryString {
         }
     }
 
-    fn order_by_clause<'a>(&'a self, builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>) {
+    fn order_by_clause<'a>(&'a self, builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>) -> bool {
         let Some((field, order)) = Self::parse_sort_by(&self.sort_by) else {
-            return;
+            return false;
         };
 
         if let s @ ("id" | "name" | "modified" | "created_at" | "updated_at") = field.as_str() {
-            builder.push(" ");
             builder.push(s);
             order.append_to(builder);
+            true
+        } else {
+            false
         }
     }
 }

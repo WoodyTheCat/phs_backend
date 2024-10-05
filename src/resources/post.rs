@@ -108,18 +108,20 @@ impl SqlxQueryString for PostQueryString {
         }
     }
 
-    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) {
+    fn order_by_clause<'a>(&'a self, builder: &mut QueryBuilder<'a, sqlx::Postgres>) -> bool {
         let Some((field, order)) = Self::parse_sort_by(&self.sort_by) else {
             builder.push(", pinned DESC, date DESC");
-            return;
+            return false;
         };
 
         if let s @ ("id" | "title" | "content" | "author" | "date" | "pinned" | "department"
         | "category") = field.as_str()
         {
-            builder.push(" ");
             builder.push(s);
             order.append_to(builder);
+            true
+        } else {
+            false
         }
     }
 }
