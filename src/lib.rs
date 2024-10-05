@@ -13,12 +13,15 @@ use auth::AuthManagerLayer;
 use axum::{Extension, Router};
 
 #[cfg(feature = "ssl")]
-use axum_server::tls_rustls::RustlsConfig;
+use ::{
+    axum_server::tls_rustls::RustlsConfig,
+    std::{net::SocketAddr, path::PathBuf},
+};
 
 use deadpool_redis::Pool as RedisPool;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use std::{error::Error, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{error::Error, sync::Arc};
 use tera::Tera;
 use time::Duration;
 use tokio::sync::Mutex;

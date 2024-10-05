@@ -15,14 +15,19 @@ use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
 use sqlx::{postgres::PgPoolOptions, Postgres};
 use tera::Tera;
 use tokio::sync::Mutex;
+
+#[cfg(feature = "tracing_subscriber")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-//use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 type DbPool = sqlx::Pool<Postgres>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(all(feature = "console_subscriber", feature = "tracing_subscriber"))]
+    compile_error!("Only one of `console_subscriber` and `tracing_subscriber` can be enabled!");
+
     // Initiate logging
+    #[cfg(feature = "tracing_subscriber")]
     tracing_subscriber::registry()
         .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
             #[cfg(debug_assertions)]
@@ -44,27 +49,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .try_init()?;
 
-    //console_subscriber::Builder::default()
-    //    .filter_env_var(
-    //        std::env::var("RUST_LOG").unwrap_or_else(
-    //            #[cfg(debug_assertions)]
-    //            |_| "trace,sqlx=info,fred=info,tokio=trace,runtime=trace".into(),
-    //            #[cfg(not(debug_assertions))]
-    //            |_| "info,sqlx=info,fred=info".into(),
-    //        ), //.with(
-    //           //    #[cfg(debug_assertions)]
-    //           //    tracing_subscriber::fmt::layer()
-    //           //        .pretty()
-    //           //        .with_file(true)
-    //           //        .with_line_number(true)
-    //           //        .with_thread_ids(true),
-    //           //    #[cfg(not(debug_assertions))]
-    //           //    tracing_subscriber::fmt::layer()
-    //           //        .compact()
-    //           //        .with_thread_ids(true),
-    //    )
-    //    .server_addr(([127, 0, 0, 1], 5555))
-    //    .init();
+    #[cfg(feature = "console_subscriber")]
+    console_subscriber::Builder::default()
+        .filter_env_var(std::env::var("RUST_LOG").unwrap_or_else(
+            #[cfg(debug_assertions)]
+            |_| "trace,sqlx=info,fred=info,tokio=trace,runtime=trace".into(),
+            #[cfg(not(debug_assertions))]
+            |_| "info,sqlx=info,fred=info".into(),
+        ))
+        .server_addr(([127, 0, 0, 1], 5555))
+        .init();
 
     let db = init_db().await?;
     let redis_pool = init_redis()?;
