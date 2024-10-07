@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE pages SET modified = 'unmodified'::page_status WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a3924001ba33a06381635197804f3201c01b21372f7942a8d377617ff63c8d3c"
+}

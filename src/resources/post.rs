@@ -148,7 +148,7 @@ async fn get_posts(
           department,
           category,
           author,
-          date as "date: _"
+          date
         FROM posts
         "#,
         cursor_options,

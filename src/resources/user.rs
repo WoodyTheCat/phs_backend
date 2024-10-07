@@ -231,16 +231,7 @@ async fn get_users(
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<CursorResponse<User>>, PhsError> {
     let users_no_hash = super::paginated_query_as::<User>(
-        r#"
-        SELECT id,
-            name,
-            username,
-            role as "role: _",
-            description,
-            department,
-            permissions as "permissions: _"
-        FROM users
-        "#,
+        r#"SELECT id, name, username, role, description, department, permissions FROM users"#,
         cursor_options,
         query_string,
         &pool,

@@ -75,17 +75,16 @@ where
     cursor.length = cursor.length.clamp(1, 200);
 
     let mut query_builder = QueryBuilder::new(init);
-    query_builder.push(" WHERE id > ");
-    query_builder.push_bind(cursor.cursor);
 
+    query_builder.push(" WHERE id ");
+    query_builder.push(if cursor.previous { "< " } else { "> " });
+    query_builder.push_bind(cursor.cursor);
     query_string.where_clause(&mut query_builder);
 
     query_builder.push(" ORDER BY ");
-
     if query_string.order_by_clause(&mut query_builder) {
         query_builder.push(", ");
     }
-
     query_builder.push("id ASC");
 
     query_builder.push(" LIMIT ").push_bind(cursor.length);

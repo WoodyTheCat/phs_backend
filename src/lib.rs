@@ -121,7 +121,11 @@ pub struct CursorOptions {
     #[serde(default)]
     cursor: i32,
     #[serde(default = "_default_cursor_length")]
+    #[serde(rename = "cursor[length]")]
     length: i32,
+    #[serde(default)]
+    #[serde(rename = "cursor[previous]")]
+    previous: bool,
 }
 
 #[rustfmt::skip]
@@ -130,8 +134,9 @@ const fn _default_cursor_length() -> i32 { 20 }
 #[derive(Deserialize, Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct CursorResponse<T> {
-    next_cursor: i32,
+    next_cursor: Option<i32>,
     previous_cursor: i32,
+    has_next_page: bool,
 
     data: Vec<T>,
 }
@@ -144,12 +149,13 @@ impl<T: CursorPaginatable> CursorResponse<T> {
     fn new(data: Vec<T>) -> Self {
         let (previous_cursor, next_cursor) = (
             data.first().map_or(0, |v| <T as CursorPaginatable>::id(v)),
-            data.last().map_or(0, |v| <T as CursorPaginatable>::id(v)),
+            data.last().map(|v| <T as CursorPaginatable>::id(v)),
         );
 
         Self {
             next_cursor,
             previous_cursor,
+            has_next_page: data.len() != 0,
 
             data,
         }

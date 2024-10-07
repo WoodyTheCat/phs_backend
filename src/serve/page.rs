@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::Deserialize;
-use sqlx::PgPool;
+use sqlx::{prelude::FromRow, PgPool};
 use tera::Tera;
 use tokio::{
     fs::File,
@@ -19,6 +19,7 @@ use crate::{
     auth::{AuthSession, Permission, RequirePermission},
     error::PhsError,
     resources::HasSqlxQueryString,
+    serve::PageStatus,
     CursorOptions, CursorResponse,
 };
 
@@ -157,11 +158,7 @@ async fn get_dynamic_page_metadata(
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<CursorResponse<DynamicPageMetadata>>, PhsError> {
     let pages = crate::resources::paginated_query_as::<DynamicPageMetadata>(
-        r#"
-            SELECT
-            id, name, created_at, updated_at, modified as "modified: _"
-            FROM pages
-        "#,
+        r"SELECT id, name, created_at, updated_at, modified FROM pages",
         cursor_options,
         query_string,
         &pool,
