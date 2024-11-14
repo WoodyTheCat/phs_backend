@@ -141,6 +141,7 @@ async fn create_user(
     Extension(pool): Extension<PgPool>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<Json<User>, PhsError> {
+    tracing::trace!("Here");
     if req.department.is_some()
         && sqlx::query_as!(
             Department,
@@ -255,7 +256,7 @@ async fn put_user(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
-    Query(id): Query<i32>,
+    Path(id): Path<i32>,
     Extension(pool): Extension<PgPool>,
     Json(body): Json<PutUserBody>,
 ) -> Result<Json<User>, PhsError> {
@@ -438,7 +439,7 @@ async fn delete_user(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::ManageUsers as u8 }>,
 
-    Query(id): Query<i32>,
+    Path(id): Path<i32>,
     Extension(pool): Extension<PgPool>,
 ) -> Result<(), PhsError> {
     sqlx::query!("DELETE FROM users WHERE id = $1", id)

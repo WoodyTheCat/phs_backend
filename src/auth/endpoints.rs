@@ -1,7 +1,7 @@
 use super::Session;
 use argon2::{password_hash, Argon2, PasswordHash, PasswordVerifier};
 use axum::{
-    extract::Query,
+    extract::{Path, Query},
     http::StatusCode,
     routing::{get, post, put},
     Extension, Json, Router,
@@ -20,13 +20,13 @@ use super::{AuthSession, Group, RequirePermission};
 
 pub fn router() -> Router {
     Router::new()
-        .route("/v1/login", post(login))
-        .route("/v1/logout", get(logout))
-        .route("/v1/whoami", get(whoami))
-        .route("/v1/groups", get(get_groups).post(create_group))
-        .route("/v1/group/:id", put(put_group).delete(delete_group))
+        .route("/v1/auth/login", post(login))
+        .route("/v1/auth/logout", get(logout))
+        .route("/v1/auth/whoami", get(whoami))
+        .route("/v1/auth/groups", get(get_groups).post(create_group))
+        .route("/v1/auth/group/:id", put(put_group).delete(delete_group))
         .route(
-            "/v1/user_groups",
+            "/v1/auth/user_groups",
             get(add_to_group).delete(delete_from_group),
         )
 }
@@ -202,7 +202,7 @@ async fn put_group(
     _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     Extension(pool): Extension<PgPool>,
-    Query(id): Query<i32>,
+    Path(id): Path<i32>,
     Json(body): Json<PutGroupBody>,
 ) -> Result<Json<Group>, PhsError> {
     let group = sqlx::query_as!(
@@ -228,7 +228,7 @@ async fn delete_group(
     _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
 
     Extension(pool): Extension<PgPool>,
-    Query(id): Query<i32>,
+    Path(id): Path<i32>,
 ) -> Result<(), PhsError> {
     sqlx::query!(r#"delete from groups where id = $1"#, id)
         .fetch_one(&pool)

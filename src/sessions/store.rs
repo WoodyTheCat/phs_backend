@@ -153,7 +153,7 @@ impl SessionStore {
         redis::cmd("JSON.DEL")
             .arg(key)
             .arg("$")
-            .query_async(&mut conn)
+            .query_async::<()>(&mut conn)
             .await?;
 
         Ok(())
