@@ -25,9 +25,10 @@ pub trait CookieController: Clone + Send + 'static {
 
 #[doc(hidden)]
 #[derive(Debug, Clone)]
-#[cfg(not(feature = "signed"))]
+#[cfg(not(feature = "signed_cookies"))]
 pub struct PlaintextCookie;
 
+#[cfg(not(feature = "signed_cookies"))]
 impl CookieController for PlaintextCookie {
     fn get(&self, cookies: &Cookies, name: &str) -> Option<Cookie<'static>> {
         cookies.get(name).map(Cookie::into_owned)
@@ -63,26 +64,6 @@ impl CookieController for SignedCookie {
         cookies.signed(&self.key).remove(cookie);
     }
 }
-//
-//#[doc(hidden)]
-//#[derive(Debug, Clone)]
-//pub struct PrivateCookie {
-//    key: Key,
-//}
-//
-//impl CookieController for PrivateCookie {
-//    fn get(&self, cookies: &Cookies, name: &str) -> Option<Cookie<'static>> {
-//        cookies.private(&self.key).get(name).map(Cookie::into_owned)
-//    }
-//
-//    fn add(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-//        cookies.private(&self.key).add(cookie)
-//    }
-//
-//    fn remove(&self, cookies: &Cookies, cookie: Cookie<'static>) {
-//        cookies.private(&self.key).remove(cookie)
-//    }
-//}
 
 #[derive(Debug, Clone)]
 pub struct SessionConfig<'a> {
@@ -325,21 +306,6 @@ impl SessionManagerLayer<SignedCookie> {
             session_store: Arc::new(session_store),
             session_config,
             cookie_controller: SignedCookie { key },
-        }
-    }
-}
-
-#[cfg(feature = "private")]
-impl SessionManagerLayer<C = PrivateCookie> {
-    pub fn new_private(
-        session_store: SessionStore,
-        session_config: SessionConfig<'static>,
-        key: Key,
-    ) -> SessionManagerLayer<PrivateCookie> {
-        SessionManagerLayer::<PrivateCookie> {
-            session_store: Arc::new(session_store),
-            session_config,
-            cookie_controller: PrivateCookie { key },
         }
     }
 }
