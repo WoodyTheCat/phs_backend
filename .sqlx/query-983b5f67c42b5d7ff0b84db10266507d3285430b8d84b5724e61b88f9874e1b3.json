@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, username, name,\n            COALESCE(G.group_ids, array[]::int[]) AS \"group_ids!: _\",\n            COALESCE(G.permissions, array[]::permission[]) AS \"permissions!: _\"\n        FROM\n            users\n        LEFT JOIN (\n            SELECT\n    \t          UG.user_id AS id,\n    \t          ARRAY_AGG(DISTINCT G.id) AS group_ids,\n    \t          ARRAY_AGG(perms_set) AS permissions\n            FROM\n                users_groups UG\n            JOIN groups G ON G.id = UG.group_id,\n            (\n                SELECT\n    \t              UNNEST(permissions) AS perms_set\n                FROM\n        \t          groups\n            )\n            WHERE UG.user_id = $1\n            GROUP BY UG.user_id\n        ) G\n        USING (id)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "group_ids!: _",
+        "type_info": "Int4Array"
+      },
+      {
+        "ordinal": 4,
+        "name": "permissions!: _",
+        "type_info": {
+          "Custom": {
+            "name": "permission[]",
+            "kind": {
+              "Array": {
+                "Custom": {
+                  "name": "permission",
+                  "kind": {
+                    "Enum": [
+                      "edit_departments",
+                      "edit_categories",
+                      "create_posts",
+                      "edit_posts",
+                      "manage_users",
+                      "manage_permissions",
+                      "manage_pages"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "983b5f67c42b5d7ff0b84db10266507d3285430b8d84b5724e61b88f9874e1b3"
+}

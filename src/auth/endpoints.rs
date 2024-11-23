@@ -10,10 +10,9 @@ use serde::Deserialize;
 use sqlx::PgPool;
 
 use crate::{
-    auth::{AuthUser, Permission},
+    auth::{AuthUser, Permission, UserPermissions},
     error::PhsError,
-    resources::{HasSqlxQueryString, Role},
-    CursorOptions, CursorResponse,
+    resources::{CursorOptions, CursorResponse, HasSqlxQueryString, Role},
 };
 
 use super::{AuthSession, Group, RequirePermission};
@@ -29,6 +28,8 @@ pub fn router() -> Router {
             "/v1/auth/users/groups",
             get(add_to_group).delete(delete_from_group),
         )
+        .route("/v1/auth/users/permissions/:id", get(get_user_permissions))
+        .route("/v1/auth/users/permissions", get(get_users_permissions))
 }
 
 #[derive(Deserialize)]
@@ -275,4 +276,90 @@ async fn delete_from_group(
     .await?;
 
     Ok(())
+}
+
+async fn get_users_permissions(
+    _auth_session: AuthSession,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
+
+    Extension(pool): Extension<PgPool>,
+
+    Query(cursor_options): Query<CursorOptions>,
+    Query(query_string): Query<<UserPermissions as HasSqlxQueryString>::QueryString>,
+) -> Result<Json<CursorResponse<UserPermissions>>, PhsError> {
+    crate::resources::paginated_query_as::<UserPermissions>(
+        r#"
+        SELECT
+            id, username, name,
+            COALESCE(G.group_ids, array[]::int[]) AS group_ids,
+            COALESCE(G.permissions, array[]::permission[]) AS permissions
+        FROM
+            users
+        LEFT JOIN (
+            SELECT
+    	          UG.user_id AS id,
+    	          ARRAY_AGG(DISTINCT G.id) AS group_ids,
+    	          ARRAY_AGG(element) AS permissions
+            FROM
+                users_groups UG
+            JOIN groups G ON G.id = UG.group_id,
+            (
+                SELECT
+    	              UNNEST(permissions) AS element
+                FROM
+        	          groups
+            )
+            GROUP BY UG.user_id
+        ) G
+        USING (id)
+        "#,
+        cursor_options,
+        query_string,
+        &pool,
+    )
+    .await
+    .map(|users_perms| Json(CursorResponse::new(users_perms)))
+}
+
+async fn get_user_permissions(
+    _auth_session: AuthSession,
+    _: RequirePermission<{ Permission::ManagePermissions as u8 }>,
+
+    Extension(pool): Extension<PgPool>,
+    Path(id): Path<i32>,
+) -> Result<Json<UserPermissions>, PhsError> {
+    sqlx::query_as!(
+        UserPermissions,
+        r#"
+        SELECT
+            id, username, name,
+            COALESCE(G.group_ids, array[]::int[]) AS "group_ids!: _",
+            COALESCE(G.permissions, array[]::permission[]) AS "permissions!: _"
+        FROM
+            users
+        LEFT JOIN (
+            SELECT
+    	          UG.user_id AS id,
+    	          ARRAY_AGG(DISTINCT G.id) AS group_ids,
+    	          ARRAY_AGG(perms_set) AS permissions
+            FROM
+                users_groups UG
+            JOIN groups G ON G.id = UG.group_id,
+            (
+                SELECT
+    	              UNNEST(permissions) AS perms_set
+                FROM
+        	          groups
+            )
+            WHERE UG.user_id = $1
+            GROUP BY UG.user_id
+        ) G
+        USING (id)
+        "#,
+        id
+    )
+    .fetch_one(&pool)
+    .await
+    .map(Json)
+    .map_err(Into::into)
 }

@@ -14,7 +14,7 @@ mod permission;
 mod service;
 
 pub use endpoints::router;
-pub use permission::{Group, Permission, RequirePermission};
+pub use permission::{Group, Permission, RequirePermission, UserPermissions};
 pub use service::AuthManagerLayer;
 
 #[async_trait]
