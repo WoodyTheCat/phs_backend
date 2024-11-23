@@ -3,10 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
 use time::PrimitiveDateTime;
 
-use crate::{
-    resources::{HasSqlxQueryString, SqlxQueryString},
-    CursorPaginatable,
-};
+use crate::resources::{CursorPaginatable, HasSqlxQueryString, SqlxQueryString};
 
 mod page;
 mod render;

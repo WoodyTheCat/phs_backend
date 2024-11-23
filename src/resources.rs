@@ -8,11 +8,11 @@ mod post;
 mod user;
 
 pub use department::Department;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgRow, FromRow, PgPool, QueryBuilder};
 pub use user::Role;
 
-use crate::{error::PhsError, CursorOptions};
+use crate::error::PhsError;
 
 pub fn router() -> Router {
     Router::new()
@@ -20,6 +20,53 @@ pub fn router() -> Router {
         .merge(post::router())
         .merge(category::router())
         .merge(department::router())
+}
+
+#[derive(Deserialize, Debug, Serialize)]
+pub struct CursorOptions {
+    #[serde(default)]
+    cursor: i32,
+    #[serde(default = "_default_cursor_length")]
+    #[serde(rename = "cursor[length]")]
+    length: i32,
+    #[serde(default)]
+    #[serde(rename = "cursor[previous]")]
+    previous: bool,
+}
+
+#[rustfmt::skip]
+const fn _default_cursor_length() -> i32 { 20 }
+
+#[derive(Deserialize, Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CursorResponse<T> {
+    next_cursor: Option<i32>,
+    previous_cursor: i32,
+    has_next_page: bool,
+
+    data: Vec<T>,
+}
+
+pub trait CursorPaginatable {
+    fn id(&self) -> i32;
+}
+
+impl<T: CursorPaginatable> CursorResponse<T> {
+    pub fn new(data: Vec<T>) -> Self {
+        let (previous_cursor, next_cursor) = (
+            data.first().map_or(0, |v| <T as CursorPaginatable>::id(v)),
+            data.last().map(|v| <T as CursorPaginatable>::id(v)),
+        );
+
+        Self {
+            next_cursor,
+            previous_cursor,
+            // FIXME: ??? This doesn't do what it says...
+            has_next_page: data.len() != 0,
+
+            data,
+        }
+    }
 }
 
 pub enum SortOrder {

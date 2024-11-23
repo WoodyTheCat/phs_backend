@@ -11,16 +11,17 @@ use tracing::instrument;
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
     error::PhsError,
-    CursorOptions, CursorPaginatable, CursorResponse,
 };
 
-use super::{HasSqlxQueryString, SqlxQueryString};
+use super::{
+    CursorOptions, CursorPaginatable, CursorResponse, HasSqlxQueryString, SqlxQueryString,
+};
 
 pub fn router() -> Router {
     Router::new()
         .route("/v1/posts", get(get_posts).post(new_post))
         .route(
-            "/v1/post/:id",
+            "/v1/posts/:id",
             delete(delete_post).put(put_post).get(get_post),
         )
 }
@@ -139,7 +140,7 @@ async fn get_posts(
 
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<CursorResponse<Post>>, PhsError> {
-    let posts: Vec<Post> = super::paginated_query_as::<Post>(
+    super::paginated_query_as::<Post>(
         r#"
         SELECT id,
           title,
@@ -155,9 +156,9 @@ async fn get_posts(
         query_string,
         &pool,
     )
-    .await?;
-
-    Ok(Json(CursorResponse::new(posts)))
+    .await
+    .map(|posts| Json(CursorResponse::new(posts)))
+    .map_err(Into::into)
 }
 
 #[instrument(skip(pool))]
@@ -165,7 +166,7 @@ async fn get_post(
     Extension(pool): Extension<PgPool>,
     Path(id): Path<i32>,
 ) -> Result<Json<Post>, PhsError> {
-    let post = sqlx::query_as!(
+    sqlx::query_as!(
         Post,
         r#"
         SELECT id,
@@ -182,9 +183,9 @@ async fn get_post(
         id,
     )
     .fetch_one(&pool)
-    .await?;
-
-    Ok(Json(post))
+    .await
+    .map(Json)
+    .map_err(Into::into)
 }
 
 #[derive(Deserialize, Debug)]
@@ -206,7 +207,7 @@ async fn new_post(
 ) -> Result<Json<Post>, PhsError> {
     let user = auth_session.data();
 
-    let post = sqlx::query_as!(
+    sqlx::query_as!(
         Post,
         r#"
             INSERT INTO posts (
@@ -235,9 +236,9 @@ async fn new_post(
         body.category,
     )
     .fetch_one(&pool)
-    .await?;
-
-    Ok(Json(post))
+    .await
+    .map(Json)
+    .map_err(Into::into)
 }
 
 #[instrument(skip(pool, _auth_session))]
@@ -274,7 +275,7 @@ async fn put_post(
     Path(id): Path<i32>,
     put_body: Json<PostPatchBody>,
 ) -> Result<Json<Post>, PhsError> {
-    let post = sqlx::query_as!(
+    sqlx::query_as!(
         Post,
         r#"
             UPDATE posts
@@ -303,7 +304,7 @@ async fn put_post(
         id,
     )
     .fetch_one(&pool)
-    .await?;
-
-    Ok(Json(post))
+    .await
+    .map(Json)
+    .map_err(Into::into)
 }

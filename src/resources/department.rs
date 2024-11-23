@@ -21,7 +21,7 @@ pub struct Department {
 pub fn router() -> Router {
     Router::new()
         .route(
-            "/v1/department/:id",
+            "/v1/departments/:id",
             delete(delete_department)
                 .put(put_department)
                 .get(get_department),
@@ -36,14 +36,14 @@ pub fn router() -> Router {
 async fn get_departments(
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<Vec<Department>>, PhsError> {
-    let departments = sqlx::query_as!(
+    sqlx::query_as!(
         Department,
         r#"SELECT id, department FROM departments LIMIT 100"#
     )
     .fetch_all(&pool)
-    .await?;
-
-    Ok(Json(departments))
+    .await
+    .map(Json)
+    .map_err(Into::into)
 }
 
 #[instrument(skip(pool))]

@@ -1,7 +1,6 @@
 use crate::{
     error::PhsError,
-    resources::{HasSqlxQueryString, SqlxQueryString},
-    CursorPaginatable,
+    resources::{CursorPaginatable, HasSqlxQueryString, SqlxQueryString},
 };
 use axum::{
     async_trait,

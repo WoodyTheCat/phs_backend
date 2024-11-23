@@ -21,7 +21,7 @@ pub struct Category {
 pub fn router() -> Router {
     Router::new()
         .route(
-            "/v1/category/:id",
+            "/v1/categories/:id",
             delete(delete_tag).put(put_tag).get(get_tag),
         )
         .route("/v1/categories", post(create_tag).get(get_tags))

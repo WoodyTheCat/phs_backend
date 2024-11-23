@@ -8,7 +8,7 @@ use argon2::{
 use axum::{
     extract::{Path, Query},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
     Extension, Json, Router,
 };
 use deadpool_redis::Pool as RedisPool;
@@ -20,10 +20,12 @@ use tracing::instrument;
 use crate::{
     auth::{AuthSession, Permission, RequirePermission},
     error::PhsError,
-    CursorOptions, CursorPaginatable, CursorResponse,
+    resources::Department,
 };
 
-use super::{Department, HasSqlxQueryString, SqlxQueryString};
+use super::{
+    CursorOptions, CursorPaginatable, CursorResponse, HasSqlxQueryString, SqlxQueryString,
+};
 
 pub fn router() -> Router {
     Router::new()
@@ -32,8 +34,8 @@ pub fn router() -> Router {
             "/v1/users/:id",
             get(get_user).put(put_user).delete(delete_user),
         )
-        .route("/v1/users/change_password", get(change_password))
-        .route("/v1/users/reset_password", get(reset_password))
+        .route("/v1/users/change-password", post(change_password))
+        .route("/v1/users/reset-password", post(reset_password))
 }
 
 #[derive(Serialize, Deserialize, sqlx::Type, Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,7 +136,7 @@ struct CreateUserRequest {
     department: Option<i32>,
 }
 
-#[instrument(skip(pool, _auth_session))]
+#[instrument(skip(pool, _auth_session, req))]
 async fn create_user(
     _auth_session: AuthSession,
     _: RequirePermission<{ Permission::ManageUsers as u8 }>,
@@ -142,7 +144,6 @@ async fn create_user(
     Extension(pool): Extension<PgPool>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<Json<User>, PhsError> {
-    tracing::trace!("Here");
     if req.department.is_some()
         && sqlx::query_as!(
             Department,
@@ -337,7 +338,7 @@ async fn change_password(
         new_hash,
         user_data.id()
     )
-    .fetch_one(&pool)
+    .execute(&pool)
     .await?;
 
     let mut conn = redis_pool.get().await?;
@@ -414,7 +415,7 @@ async fn reset_password(
         new_hash,
         body.user_id
     )
-    .fetch_one(&pool)
+    .execute(&pool)
     .await?;
 
     // Clear all of the user's sessions
@@ -444,7 +445,7 @@ async fn delete_user(
     Extension(pool): Extension<PgPool>,
 ) -> Result<(), PhsError> {
     sqlx::query!("DELETE FROM users WHERE id = $1", id)
-        .fetch_one(&pool)
+        .execute(&pool)
         .await?;
 
     Ok(())

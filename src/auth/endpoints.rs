@@ -26,7 +26,7 @@ pub fn router() -> Router {
         .route("/v1/auth/groups", get(get_groups).post(create_group))
         .route("/v1/auth/group/:id", put(put_group).delete(delete_group))
         .route(
-            "/v1/auth/user_groups",
+            "/v1/auth/users/groups",
             get(add_to_group).delete(delete_from_group),
         )
 }
@@ -137,9 +137,7 @@ async fn whoami(session: AuthSession) -> Result<Json<i32>, PhsError> {
 
 /// Logout only the current session
 async fn logout(mut auth_session: AuthSession) -> Result<(), PhsError> {
-    auth_session.destroy().await?;
-
-    Ok(())
+    auth_session.destroy().await
 }
 
 async fn get_groups(
@@ -151,15 +149,15 @@ async fn get_groups(
 
     Extension(pool): Extension<PgPool>,
 ) -> Result<Json<CursorResponse<Group>>, PhsError> {
-    let groups = crate::resources::paginated_query_as::<Group>(
+    crate::resources::paginated_query_as::<Group>(
         r"SELECT id, group_name, permissions FROM groups",
         cursor_options,
         query_string,
         &pool,
     )
-    .await?;
-
-    Ok(Json(CursorResponse::new(groups)))
+    .await
+    .map(|groups| Json(CursorResponse::new(groups)))
+    .map_err(Into::into)
 }
 
 #[derive(Deserialize)]
@@ -175,7 +173,7 @@ async fn create_group(
     Extension(pool): Extension<PgPool>,
     Json(body): Json<CreateGroupBody>,
 ) -> Result<Json<Group>, PhsError> {
-    let group = sqlx::query_as!(
+    sqlx::query_as!(
         Group,
         r#"
         insert into groups(group_name, permissions)
@@ -186,9 +184,9 @@ async fn create_group(
         body.permissions as Vec<Permission>
     )
     .fetch_one(&pool)
-    .await?;
-
-    Ok(Json(group))
+    .await
+    .map(Json)
+    .map_err(Into::into)
 }
 
 #[derive(Deserialize)]
@@ -205,7 +203,7 @@ async fn put_group(
     Path(id): Path<i32>,
     Json(body): Json<PutGroupBody>,
 ) -> Result<Json<Group>, PhsError> {
-    let group = sqlx::query_as!(
+    sqlx::query_as!(
         Group,
         r#"
         update groups
@@ -218,9 +216,9 @@ async fn put_group(
         id
     )
     .fetch_one(&pool)
-    .await?;
-
-    Ok(Json(group))
+    .await
+    .map(Json)
+    .map_err(Into::into)
 }
 
 async fn delete_group(
