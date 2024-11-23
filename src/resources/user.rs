@@ -346,6 +346,7 @@ async fn change_password(
     let mut sessions: Vec<String> = redis::cmd("FT.SEARCH")
         .arg("idx:sessionsUserId")
         .arg(format!(r#""@id:[{0} {0}]""#, user_data.id()))
+        .arg("NOCONTENT")
         .query_async(&mut conn)
         .await
         .unwrap();
@@ -424,9 +425,9 @@ async fn reset_password(
     let sessions: Vec<String> = redis::cmd("FT.SEARCH")
         .arg("idx:sessionsUserId")
         .arg(format!(r#""@id:[{0} {0}]""#, body.user_id))
+        .arg("NOCONTENT")
         .query_async(&mut conn)
-        .await
-        .unwrap();
+        .await?;
 
     redis::cmd("DEL")
         .arg(sessions)
