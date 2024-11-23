@@ -42,6 +42,7 @@ pub fn router() -> Router {
 pub enum Role {
     Teacher,
     Admin,
+    Student,
 }
 
 #[derive(Serialize, Deserialize, FromRow)]

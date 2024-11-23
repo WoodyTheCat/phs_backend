@@ -27,7 +27,8 @@
             "kind": {
               "Enum": [
                 "teacher",
-                "admin"
+                "admin",
+                "student"
               ]
             }
           }
@@ -81,7 +82,8 @@
             "kind": {
               "Enum": [
                 "teacher",
-                "admin"
+                "admin",
+                "student"
               ]
             }
           }
