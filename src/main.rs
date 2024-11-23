@@ -11,66 +11,34 @@
 use std::{error::Error, sync::Arc};
 
 use deadpool_redis::{Config as RedisConfig, Pool as RedisPool, Runtime};
-
+use phs_backend::{ServerConfig, ServerSettings};
 use sqlx::{postgres::PgPoolOptions, Postgres};
 use tera::Tera;
 use tokio::sync::Mutex;
-
-#[cfg(feature = "tracing_subscriber")]
+use tokio::{fs, sync::RwLock};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 type DbPool = sqlx::Pool<Postgres>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    #[cfg(all(feature = "console_subscriber", feature = "tracing_subscriber"))]
-    compile_error!("Only one of `console_subscriber` and `tracing_subscriber` can be enabled!");
+    let (server_settings_value, server_config) = get_configs().await;
 
-    // Initiate logging
-    #[cfg(feature = "tracing_subscriber")]
-    tracing_subscriber::registry()
-        .with(EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(
-            #[cfg(debug_assertions)]
-            |_| "debug,sqlx=info,fred=info".into(),
-            #[cfg(not(debug_assertions))]
-            |_| "info,sqlx=info,fred=info".into(),
-        )))
-        .with(
-            #[cfg(debug_assertions)]
-            tracing_subscriber::fmt::layer()
-                .pretty()
-                .with_file(true)
-                .with_line_number(true)
-                .with_thread_ids(true),
-            #[cfg(not(debug_assertions))]
-            tracing_subscriber::fmt::layer()
-                .compact()
-                .with_thread_ids(true),
-        )
-        .try_init()?;
+    let server_settings = Arc::new(RwLock::new(server_settings_value));
+    init_logging(&server_config, server_settings.clone()).await?;
 
-    #[cfg(feature = "console_subscriber")]
-    console_subscriber::Builder::default()
-        .filter_env_var(std::env::var("RUST_LOG").unwrap_or_else(
-            #[cfg(debug_assertions)]
-            |_| "trace,sqlx=info,fred=info,tokio=trace,runtime=trace".into(),
-            #[cfg(not(debug_assertions))]
-            |_| "info,sqlx=info,fred=info".into(),
-        ))
-        .server_addr(([127, 0, 0, 1], 5555))
-        .init();
+    init_file_layout().await?;
 
-    let db = init_db().await?;
+    let db_pool = init_db().await?;
     let redis_pool = init_redis()?;
-
-    // Create a folder for the dynamic page data
-    if !tokio::fs::try_exists("pages").await? {
-        tokio::fs::create_dir("pages").await?;
-    }
 
     let tera = Arc::new(Mutex::new(Tera::new("pages/templates/**/*")?));
 
-    phs_backend::serve(db, redis_pool, tera).await?;
+    if server_config.tls_enabled {
+        phs_backend::serve(db_pool, redis_pool, tera, &server_config, server_settings).await?;
+    } else {
+        phs_backend::serve_http(db_pool, redis_pool, tera, &server_config, server_settings).await?;
+    }
 
     Ok(())
 }
@@ -94,4 +62,70 @@ async fn init_db() -> Result<DbPool, Box<dyn Error>> {
     sqlx::migrate!().run(&db).await?;
 
     Ok(db)
+}
+
+async fn init_file_layout() -> Result<(), Box<dyn Error>> {
+    // Create folders for the dynamic page data
+    if !fs::try_exists("./pages/fragments").await? {
+        fs::create_dir_all("./pages/fragments").await?;
+    }
+    if !fs::try_exists("./pages/dist").await? {
+        fs::create_dir_all("./pages/dist").await?;
+    }
+    if !fs::try_exists("./pages/specs").await? {
+        fs::create_dir_all("./pages/specs").await?;
+    }
+
+    Ok(())
+}
+
+async fn init_logging(
+    config: &ServerConfig,
+    settings: Arc<RwLock<ServerSettings>>,
+) -> Result<(), Box<dyn Error>> {
+    #[cfg(debug_assertions)]
+    let use_console = config.use_tokio_console;
+    #[cfg(not(debug_assertions))]
+    let use_console = false;
+
+    if use_console {
+        console_subscriber::Builder::default()
+            .filter_env_var("trace,sqlx=info,fred=info,tokio=trace,runtime=trace")
+            .server_addr(([127, 0, 0, 1], 5555))
+            .init();
+        tracing::info!("Using Tokio debug console");
+    } else {
+        tracing_subscriber::registry()
+            .with(EnvFilter::new("trace,sqlx=info,fred=info"))
+            .with(
+                #[cfg(debug_assertions)]
+                tracing_subscriber::fmt::layer()
+                    .pretty()
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_thread_ids(true),
+                #[cfg(not(debug_assertions))]
+                tracing_subscriber::fmt::layer()
+                    .compact()
+                    .with_thread_ids(true),
+            )
+            .try_init()?;
+        tracing::info!("Logging to stdout");
+    }
+
+    Ok(())
+}
+
+async fn get_configs() -> (ServerSettings, ServerConfig) {
+    (
+        ServerSettings {},
+        ServerConfig {
+            http_port: 5000,
+            https_port: 5001,
+            tls_enabled: false,
+            tls_options: None,
+            #[cfg(debug_assertions)]
+            use_tokio_console: false,
+        },
+    )
 }

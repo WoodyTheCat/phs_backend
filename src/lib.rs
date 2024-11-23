@@ -9,37 +9,51 @@
 #![allow(clippy::module_name_repetitions)]
 #![forbid(unsafe_code)]
 
-use auth::AuthManagerLayer;
-use axum::{Extension, Router};
-
-#[cfg(feature = "ssl")]
-use ::{
-    axum_server::tls_rustls::RustlsConfig,
-    std::{net::SocketAddr, path::PathBuf},
+use axum::{
+    extract::{Host, Request},
+    handler::HandlerWithoutStateExt,
+    http::{StatusCode, Uri},
+    response::Redirect,
+    BoxError, Extension, Router, ServiceExt,
 };
 
+use ::{axum_server::tls_rustls::RustlsConfig, std::net::SocketAddr};
+
+use tokio::sync::{Mutex, RwLock};
+use tower_cookies::Key;
+use tower_http::{cors::CorsLayer, normalize_path::NormalizePathLayer, services::ServeDir};
+use tower_layer::Layer;
+
 use deadpool_redis::Pool as RedisPool;
-use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+
 use std::{error::Error, sync::Arc};
+
 use tera::Tera;
 use time::Duration;
-use tokio::sync::Mutex;
-use tower_cookies::Key;
-use tower_http::{cors::CorsLayer, services::ServeDir};
-
-use sessions::{Expiry, SessionConfig, SessionManagerLayer, SessionStore};
-
 extern crate slugify;
 
 mod auth;
+mod config;
 mod error;
 mod resources;
 mod serve;
 mod sessions;
+mod settings;
+
+pub use {config::ServerConfig, settings::ServerSettings};
+
+use auth::AuthManagerLayer;
+use sessions::{Expiry, SessionConfig, SessionManagerLayer, SessionStore};
 
 #[allow(clippy::missing_panics_doc)]
-pub fn app(db: PgPool, redis_pool: RedisPool, tera: Arc<Mutex<Tera>>) -> Router {
+pub fn app(
+    db: PgPool,
+    redis_pool: RedisPool,
+    tera: Arc<Mutex<Tera>>,
+    config: &ServerConfig,
+    settings: Arc<RwLock<ServerSettings>>,
+) -> Router {
     let session_store = SessionStore::new(redis_pool.clone());
     #[cfg(feature = "signed_cookies")]
     let session_manager_layer = SessionManagerLayer::new_signed(
@@ -64,100 +78,118 @@ pub fn app(db: PgPool, redis_pool: RedisPool, tera: Arc<Mutex<Tera>>) -> Router 
         .merge(serve::router())
         .route_service("/*page", ServeDir::new("pages/dist/"))
         // Layers
+        .layer(auth_layer)
+        // TODO WARN: Restrict for prod build
+        .layer(CorsLayer::very_permissive().allow_credentials(true))
         .layer(Extension(db))
         .layer(Extension(redis_pool))
         .layer(Extension(tera))
-        .layer(auth_layer)
-        .layer(CorsLayer::very_permissive().allow_credentials(true)) // TODO WARN: Restrict for prod build
+        .layer(Extension(config.clone()))
+        // This settings state needs to be saved to TOML on write, or with a timed batch operation
+        .layer(Extension(Arc::new(RwLock::new(settings))))
 }
 
 #[allow(clippy::missing_panics_doc)]
+pub async fn serve_http(
+    db: PgPool,
+    redis_pool: RedisPool,
+    tera: Arc<Mutex<Tera>>,
+    config: &ServerConfig,
+    settings: Arc<RwLock<ServerSettings>>,
+) -> Result<(), Box<dyn Error>> {
+    let app = ServiceExt::<Request>::into_make_service(
+        NormalizePathLayer::trim_trailing_slash()
+            .layer(app(db, redis_pool, tera, config, settings)),
+    );
+
+    let listener =
+        tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], config.http_port)))
+            .await
+            .map_err(|_| {
+                format!(
+                    "Listening on port {} failed. Is this port in use?",
+                    config.http_port
+                )
+            })?;
+
+    axum::serve(listener, app).await.map_err(Into::into)
+}
+
 pub async fn serve(
     db: PgPool,
     redis_pool: RedisPool,
     tera: Arc<Mutex<Tera>>,
+    config: &ServerConfig,
+    settings: Arc<RwLock<ServerSettings>>,
 ) -> Result<(), Box<dyn Error>> {
-    let app = app(db, redis_pool, tera).into_make_service();
+    let app = ServiceExt::<Request>::into_make_service(
+        NormalizePathLayer::trim_trailing_slash()
+            .layer(app(db, redis_pool, tera, config, settings)),
+    );
 
-    #[cfg(feature = "ssl")]
-    {
-        let certificate_path = dotenv::var("SSL_CERT").expect("CERT_PATH must be set");
-        let key_path = std::env::var("SSL_KEY").expect("KEY_PATH must be set");
+    let addr = SocketAddr::from(([127, 0, 0, 1], config.https_port));
 
-        // TODO combine HTTP and HTTPS servers
-        let https_port: u16 = dotenv::var("HTTPS_PORT")
-            .expect("HTTPS_PORT must be set")
-            .parse()
-            .expect("HTTPS port should be a number");
-        let http_port: u16 = dotenv::var("HTTP_PORT")
-            .expect("HTTP_PORT must be set")
-            .parse()
-            .expect("HTTP port should be a number");
+    tracing::info!("Listening on port {}", addr);
 
-        let config =
-            RustlsConfig::from_pem_file(PathBuf::from(certificate_path), PathBuf::from(key_path))
-                .await
-                .expect("Failed to load certificate");
+    tokio::spawn(redirect_http_to_https(config.clone()));
 
-        let addr = SocketAddr::from(([0, 0, 0, 0], https_port));
+    assert!(config.tls_enabled, "Serve called with TLS disabled");
 
-        axum_server::bind_rustls(addr, config).serve(app).await?;
-    }
+    let Some(tls_options) = config.tls_options.as_ref() else {
+        panic!("TLS is enabled but no options have been provided. Check that there is a [tls] section in config.toml")
+    };
 
-    #[cfg(not(feature = "ssl"))]
-    {
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:5000")
-            .await
-            .map_err(|_| "Listening on port 5000 failed. Is this port in use?")?;
+    let rustls_config =
+        RustlsConfig::from_pem_file(&tls_options.cert_path, &tls_options.key_path).await?;
 
-        axum::serve(listener, app).await?
-    }
+    axum_server::bind_rustls(addr, rustls_config)
+        .serve(app)
+        .await?;
 
     Ok(())
 }
 
-#[derive(Deserialize, Debug, Serialize)]
-pub struct CursorOptions {
-    #[serde(default)]
-    cursor: i32,
-    #[serde(default = "_default_cursor_length")]
-    #[serde(rename = "cursor[length]")]
-    length: i32,
-    #[serde(default)]
-    #[serde(rename = "cursor[previous]")]
-    previous: bool,
-}
+async fn redirect_http_to_https(server_config: ServerConfig) {
+    fn make_https(
+        host: String,
+        uri: Uri,
+        http_port: u16,
+        https_port: u16,
+    ) -> Result<Uri, BoxError> {
+        let mut parts = uri.into_parts();
 
-#[rustfmt::skip]
-const fn _default_cursor_length() -> i32 { 20 }
+        parts.scheme = Some(axum::http::uri::Scheme::HTTPS);
 
-#[derive(Deserialize, Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct CursorResponse<T> {
-    next_cursor: Option<i32>,
-    previous_cursor: i32,
-    has_next_page: bool,
-
-    data: Vec<T>,
-}
-
-trait CursorPaginatable {
-    fn id(&self) -> i32;
-}
-
-impl<T: CursorPaginatable> CursorResponse<T> {
-    fn new(data: Vec<T>) -> Self {
-        let (previous_cursor, next_cursor) = (
-            data.first().map_or(0, |v| <T as CursorPaginatable>::id(v)),
-            data.last().map(|v| <T as CursorPaginatable>::id(v)),
-        );
-
-        Self {
-            next_cursor,
-            previous_cursor,
-            has_next_page: data.len() != 0,
-
-            data,
+        if parts.path_and_query.is_none() {
+            parts.path_and_query = Some("/".parse().unwrap());
         }
+
+        let https_host = host.replace(&http_port.to_string(), &https_port.to_string());
+        parts.authority = Some(https_host.parse()?);
+
+        Ok(Uri::from_parts(parts)?)
     }
+
+    let ServerConfig {
+        https_port,
+        http_port,
+        ..
+    } = server_config;
+
+    let redirect = move |Host(host): Host, uri: Uri| async move {
+        match make_https(host, uri, http_port, https_port) {
+            Ok(uri) => Ok(Redirect::permanent(&uri.to_string())),
+            Err(error) => {
+                tracing::warn!(%error, "Failed to convert URI to HTTPS");
+                Err(StatusCode::BAD_REQUEST)
+            }
+        }
+    };
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], http_port));
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    tracing::info!("Listening on port {}", listener.local_addr().unwrap());
+    axum::serve(listener, redirect.into_make_service())
+        .await
+        .unwrap();
 }
